@@ -10,7 +10,7 @@ function formatDate(dateStr) {
   return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
 }
 
-export default function Dashboard({ onNavigate }) {
+export default function Dashboard({ onNavigate, refreshKey }) {
   const [date, setDate] = useState(today())
   const [meals, setMeals] = useState({})
   const [loading, setLoading] = useState(true)
@@ -33,7 +33,7 @@ export default function Dashboard({ onNavigate }) {
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { loadData(date) }, [date])
+  useEffect(() => { loadData(date) }, [date, refreshKey])
 
   function showToast(msg) {
     setToast(msg)

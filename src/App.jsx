@@ -40,6 +40,12 @@ const tabs = [
 export default function App() {
   const [active, setActive] = useState('dashboard')
   const [offline, setOffline] = useState(!navigator.onLine)
+  const [refreshKey, setRefreshKey] = useState(0)
+
+  function navigateWithRefresh(tab) {
+    setActive(tab)
+    if (tab === 'dashboard') setRefreshKey(k => k + 1)
+  }
 
   useEffect(() => {
     const on = () => setOffline(false)
@@ -56,10 +62,10 @@ export default function App() {
           No internet connection
         </div>
       )}
-      {active === 'dashboard' && <Dashboard onNavigate={setActive} />}
-      {active === 'meal' && <LogMeal onNavigate={setActive} />}
-      {active === 'workout' && <LogWorkout />}
-      {active === 'more' && <Settings />}
+      <div className={active === 'dashboard' ? '' : 'hidden'}><Dashboard onNavigate={setActive} refreshKey={refreshKey} /></div>
+      <div className={active === 'meal' ? '' : 'hidden'}><LogMeal onNavigate={navigateWithRefresh} /></div>
+      <div className={active === 'workout' ? '' : 'hidden'}><LogWorkout /></div>
+      <div className={active === 'more' ? '' : 'hidden'}><Settings /></div>
 
       <nav className="fixed bottom-0 left-0 right-0 bg-gray-900 border-t border-gray-800 flex justify-around">
         {tabs.map(tab => (

@@ -93,9 +93,9 @@ function setup() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
 
   var tabs = {
-    'Ingredients':     ['Name', 'Calories_100g', 'Protein_100g', 'Carbs_100g', 'Fat_100g', 'Fiber_100g', 'Sugar_100g'],
-    'Saved Meals':     ['Meal_ID', 'Meal_Name', 'Ingredient', 'Qty_g', 'Calories', 'Protein', 'Carbs', 'Fat', 'Fiber', 'Sugar'],
-    'Daily Meals':     ['Date', 'Meal_ID', 'Meal_Name', 'Ingredient', 'Qty_g', 'Calories', 'Protein', 'Carbs', 'Fat', 'Fiber', 'Sugar'],
+    'Ingredients':     ['Name', 'Calories_100g', 'Protein_100g', 'Carbs_100g', 'Fat_100g', 'Fiber_100g'],
+    'Saved Meals':     ['Meal_ID', 'Meal_Name', 'Ingredient', 'Qty_g', 'Calories', 'Protein', 'Carbs', 'Fat', 'Fiber'],
+    'Daily Meals':     ['Date', 'Meal_ID', 'Meal_Name', 'Ingredient', 'Qty_g', 'Calories', 'Protein', 'Carbs', 'Fat', 'Fiber'],
     'Exercises':       ['Name', 'Category'],
     'Saved Routines':  ['Routine_ID', 'Routine_Name', 'Exercise', 'Order'],
     'Daily Workouts':  ['Date', 'Routine_ID', 'Routine_Name', 'Exercise', 'Set_Num', 'Reps', 'Weight_kg'],
@@ -123,30 +123,30 @@ function populateIngredients() {
   }
 
   var data = [
-    ['Chicken breast', 165, 31, 0, 3.6, 0, 0],
-    ['White rice', 130, 2.7, 28, 0.3, 0.4, 0],
-    ['Olive oil', 884, 0, 0, 100, 0, 0],
-    ['Banana', 89, 1.1, 23, 0.3, 2.6, 12],
-    ['Oats', 389, 17, 66, 6.9, 11, 1],
-    ['Whole wheat bread', 247, 13, 41, 3.4, 7, 6],
-    ['Eggs', 155, 13, 1.1, 11, 0, 1.1],
-    ['Milk', 42, 3.4, 5, 1, 0, 5],
-    ['Coconut oil', 862, 0, 0, 100, 0, 0],
-    ['Coffee', 2, 0.1, 0, 0, 0, 0],
-    ['White fish', 90, 18, 0, 1.3, 0, 0],
-    ['Salmon', 208, 20, 0, 13, 0, 0],
-    ['Shrimp', 99, 24, 0.2, 0.3, 0, 0],
-    ['Beef', 250, 26, 0, 15, 0, 0],
-    ['Lamb', 294, 25, 0, 21, 0, 0],
-    ['Beef hamburger meat', 254, 17, 0, 20, 0, 0],
-    ['Potatoes', 77, 2, 17, 0.1, 2.2, 0.8],
-    ['Chicken broth', 7, 1.1, 0.2, 0.2, 0, 0.1],
-    ['Vegetable cream', 195, 1.5, 5, 19, 0.3, 3],
-    ['Pumpkin', 26, 1, 6.5, 0.1, 0.5, 2.8],
-    ['Pumpkin and potato cream', 45, 1.2, 8, 1, 1, 2],
-    ['Ham', 145, 21, 1.5, 6, 0, 1],
-    ['Cheese', 402, 25, 1.3, 33, 0, 0.5],
-    ['Protein yoghurt', 70, 10, 4, 1.5, 0, 3.5]
+    ['Chicken breast', 165, 31, 0, 3.6, 0],
+    ['White rice', 130, 2.7, 28, 0.3, 0.4],
+    ['Olive oil', 884, 0, 0, 100, 0],
+    ['Banana', 89, 1.1, 23, 0.3, 2.6],
+    ['Oats', 389, 17, 66, 6.9, 11],
+    ['Whole wheat bread', 247, 13, 41, 3.4, 7],
+    ['Eggs', 155, 13, 1.1, 11, 0],
+    ['Milk', 42, 3.4, 5, 1, 0],
+    ['Coconut oil', 862, 0, 0, 100, 0],
+    ['Coffee', 2, 0.1, 0, 0, 0],
+    ['White fish', 90, 18, 0, 1.3, 0],
+    ['Salmon', 208, 20, 0, 13, 0],
+    ['Shrimp', 99, 24, 0.2, 0.3, 0],
+    ['Beef', 250, 26, 0, 15, 0],
+    ['Lamb', 294, 25, 0, 21, 0],
+    ['Beef hamburger meat', 254, 17, 0, 20, 0],
+    ['Potatoes', 77, 2, 17, 0.1, 2.2],
+    ['Chicken broth', 7, 1.1, 0.2, 0.2, 0],
+    ['Vegetable cream', 195, 1.5, 5, 19, 0.3],
+    ['Pumpkin', 26, 1, 6.5, 0.1, 0.5],
+    ['Pumpkin and potato cream', 45, 1.2, 8, 1, 1],
+    ['Ham', 145, 21, 1.5, 6, 0],
+    ['Cheese', 402, 25, 1.3, 33, 0],
+    ['Protein yoghurt', 70, 10, 4, 1.5, 0]
   ];
 
   sheet.getRange(2, 1, data.length, data[0].length).setValues(data);

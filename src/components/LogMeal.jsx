@@ -49,7 +49,6 @@ export default function LogMeal({ onNavigate }) {
       Carbs: r.Carbs,
       Fat: r.Fat,
       Fiber: r.Fiber,
-      Sugar: r.Sugar,
     }))
     showToast('Logged to today!')
     onNavigate('dashboard')
@@ -174,7 +173,6 @@ function CustomMealForm({ onBack, onNavigate }) {
       Carbs: parseFloat(carbs) || 0,
       Fat: parseFloat(fat) || 0,
       Fiber: 0,
-      Sugar: 0,
     }]
     try {
       onNavigate('dashboard')
@@ -267,7 +265,6 @@ function CreateMeal({ onBack, onSaved }) {
       Carbs: +(ingredient.Carbs_100g * factor).toFixed(1),
       Fat: +(ingredient.Fat_100g * factor).toFixed(1),
       Fiber: +(ingredient.Fiber_100g * factor).toFixed(1),
-      Sugar: +(ingredient.Sugar_100g * factor).toFixed(1),
     }
   }
 
@@ -307,7 +304,6 @@ function CreateMeal({ onBack, onSaved }) {
       Carbs: item.macros.Carbs,
       Fat: item.macros.Fat,
       Fiber: item.macros.Fiber,
-      Sugar: item.macros.Sugar,
     }))
     try {
       await saveMeal(rows)
