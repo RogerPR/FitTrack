@@ -59,6 +59,10 @@ export default function LogMeal({ onNavigate }) {
     return <CreateMeal onBack={() => setView('list')} onSaved={handleMealSaved} />
   }
 
+  if (view === 'ingredient') {
+    return <LogIngredientForm onBack={() => setView('list')} onNavigate={onNavigate} />
+  }
+
   if (view === 'custom') {
     return <CustomMealForm onBack={() => setView('list')} onNavigate={onNavigate} />
   }
@@ -74,6 +78,12 @@ export default function LogMeal({ onNavigate }) {
         className="w-full bg-blue-600 text-white py-3 rounded-lg font-semibold mb-2 min-h-[48px] active:bg-blue-700"
       >
         + Create New Meal
+      </button>
+      <button
+        onClick={() => setView('ingredient')}
+        className="w-full bg-gray-700 text-white py-3 rounded-lg font-semibold mb-2 min-h-[48px] active:bg-gray-600"
+      >
+        Log Ingredient
       </button>
       <button
         onClick={() => setView('custom')}
@@ -143,6 +153,111 @@ export default function LogMeal({ onNavigate }) {
           {toast}
         </div>
       )}
+    </div>
+  )
+}
+
+function LogIngredientForm({ onBack, onNavigate }) {
+  const [search, setSearch] = useState('')
+  const [qtyInput, setQtyInput] = useState(null)
+  const [qtyValue, setQtyValue] = useState('100')
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return ingredientsData
+    const q = search.toLowerCase()
+    return ingredientsData.filter(i => i.Name.toLowerCase().includes(q))
+  }, [search])
+
+  function handleConfirm() {
+    const qty = parseInt(qtyValue) || 0
+    if (qty <= 0) return
+    const factor = qty / 100
+    const ing = qtyInput
+    const mealId = 'ing_' + Date.now()
+    const date = today()
+    const rows = [{
+      Date: date,
+      Meal_ID: mealId,
+      Meal_Name: ing.Name,
+      Ingredient: ing.Name,
+      Qty_g: qty,
+      Calories: +(ing.Calories_100g * factor).toFixed(1),
+      Protein: +(ing.Protein_100g * factor).toFixed(1),
+      Carbs: +(ing.Carbs_100g * factor).toFixed(1),
+      Fat: +(ing.Fat_100g * factor).toFixed(1),
+      Fiber: +(ing.Fiber_100g * factor).toFixed(1),
+    }]
+    onNavigate('dashboard')
+    logMeal(rows).catch(() => {})
+  }
+
+  return (
+    <div className="p-4">
+      <div className="flex items-center gap-3 mb-4">
+        <button onClick={onBack} className="text-blue-400 min-w-[48px] min-h-[48px] flex items-center justify-center">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6">
+            <polyline points="15 18 9 12 15 6"/>
+          </svg>
+        </button>
+        <h1 className="text-2xl font-bold">Log Ingredient</h1>
+      </div>
+
+      {qtyInput && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-800 rounded-lg p-6 w-full max-w-sm">
+            <h3 className="text-lg font-bold mb-1">{qtyInput.Name}</h3>
+            <p className="text-sm text-gray-400 mb-4">
+              Per 100g: {qtyInput.Calories_100g} cal &middot; {qtyInput.Protein_100g}g P &middot; {qtyInput.Carbs_100g}g C &middot; {qtyInput.Fat_100g}g F
+            </p>
+            <label className="text-sm text-gray-400">Quantity (grams)</label>
+            <input
+              type="number"
+              inputMode="numeric"
+              value={qtyValue}
+              onChange={e => setQtyValue(e.target.value)}
+              autoFocus
+              className="w-full bg-gray-700 rounded-lg p-3 mt-1 mb-4 text-lg text-white"
+            />
+            <div className="flex gap-3">
+              <button
+                onClick={() => { setQtyInput(null); setQtyValue('100') }}
+                className="flex-1 py-3 rounded-lg bg-gray-700 text-gray-300 min-h-[48px]"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirm}
+                className="flex-1 py-3 rounded-lg bg-green-600 text-white font-semibold min-h-[48px] active:bg-green-700"
+              >
+                Log
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <input
+        type="text"
+        placeholder="Search ingredients..."
+        value={search}
+        onChange={e => setSearch(e.target.value)}
+        className="w-full bg-gray-800 rounded-lg p-3 mb-3 text-white placeholder-gray-500"
+      />
+
+      <div className="space-y-1">
+        {filtered.map(ing => (
+          <button
+            key={ing.Name}
+            onClick={() => setQtyInput(ing)}
+            className="w-full text-left bg-gray-800 rounded-lg p-3 min-h-[48px] active:bg-gray-700"
+          >
+            <p className="font-medium">{ing.Name}</p>
+            <p className="text-sm text-gray-400">
+              {ing.Calories_100g} cal &middot; {ing.Protein_100g}g P &middot; {ing.Carbs_100g}g C &middot; {ing.Fat_100g}g F
+            </p>
+          </button>
+        ))}
+      </div>
     </div>
   )
 }
