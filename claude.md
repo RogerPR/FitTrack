@@ -1,4 +1,8 @@
-# FitTrack — Personal Fitness & Nutrition Tracker -
+# FitTrack — Personal Fitness & Nutrition Tracker
+
+## Project Status: v1 COMPLETE (Sessions 0-4 done)
+App is live at https://rogerpr.github.io/FitTrack/ and installable as a PWA on Android.
+Next: Session 5 (Meal Plans + Workout Suggestions) — see roadmap.md.
 
 ## Project Overview
 A personal, mobile-first fitness and nutrition tracker for a single user. Static frontend hosted on GitHub Pages, with Google Apps Script as the backend API proxying all reads/writes to a Google Sheet.
@@ -135,6 +139,29 @@ Endpoints (actions):
 - `getLastWorkoutWeights(routineId)` → returns most recent weights for a routine's exercises
 
 All responses: `{ success: true, data: ... }` or `{ success: false, error: "message" }`.
+
+## Deployment & Infrastructure
+- **Frontend:** GitHub Pages, auto-deployed via GitHub Actions on push to `main` (`.github/workflows/deploy.yml`)
+- **API URL:** Stored in `src/config.js` (gitignored). Injected during CI via `VITE_API_URL` GitHub Actions secret.
+- **Vite base path:** `/FitTrack/` (configured in `vite.config.js`)
+- **PWA:** `public/manifest.json` + `public/sw.js` (network-first, cache fallback for offline)
+- **Apps Script deployment:** Must select "New version" when redeploying, or the live web app won't update.
+
+## Key Files
+- `src/App.jsx` — Root component, tab navigation, offline banner
+- `src/components/Dashboard.jsx` — Daily summary, macro totals, meal/workout lists, refresh button
+- `src/components/LogMeal.jsx` — Saved meals list, "Log to Today", Create Meal flow
+- `src/components/LogWorkout.jsx` — Saved routines, Create Routine, Log Workout Session with pre-fill
+- `src/api/sheets.js` — All 12 API functions (POST to Apps Script)
+- `src/config.js` — API_URL (gitignored, generated in CI from secret)
+- `src/data/ingredients.json` — 24 ingredients with macros (local cache)
+- `src/data/exercises.json` — 20 exercises with categories (local cache)
+- `Code.gs` — Apps Script backend (local copy, must be manually synced to script editor)
+
+## Known Gotchas
+- **Apps Script `instanceof Date` is broken.** `getValues()` returns Date objects that fail `instanceof Date`. Use `typeof val.getTime === 'function'` instead.
+- **Apps Script deployment versioning.** Editing code in the script editor does NOT update the live web app. Must: Manage deployments → edit → Version: "New version" → Deploy.
+- **`src/config.js` is gitignored.** The API URL is injected via the `VITE_API_URL` GitHub Actions secret during CI build. Update both local file and secret when the deployment URL changes.
 
 ## Code Style
 - Minimal comments — only where something non-obvious happens.

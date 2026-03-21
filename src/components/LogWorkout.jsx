@@ -260,7 +260,7 @@ function LogWorkoutSession({ routine, onBack, onSaved }) {
   const [exercises, setExercises] = useState(
     routine.exercises.map(name => ({
       name,
-      sets: [{ reps: '', weight: '' }],
+      sets: [{ reps: '12', weight: '' }],
     }))
   )
   const [saving, setSaving] = useState(false)
@@ -333,7 +333,7 @@ function LogWorkoutSession({ routine, onBack, onSaved }) {
   }
 
   function addExercise(name) {
-    setExercises(prev => [...prev, { name, sets: [{ reps: '', weight: '' }] }])
+    setExercises(prev => [...prev, { name, sets: [{ reps: '12', weight: '' }] }])
     setShowAddExercise(false)
   }
 

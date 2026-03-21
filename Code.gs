@@ -45,7 +45,7 @@ function getSheetData(name) {
     var obj = {};
     for (var j = 0; j < headers.length; j++) {
       var val = data[i][j];
-      if (val instanceof Date) val = normalizeDate(val);
+      if (val && typeof val.getTime === 'function') val = normalizeDate(val);
       obj[headers[j]] = val;
     }
     rows.push(obj);
@@ -54,7 +54,7 @@ function getSheetData(name) {
 }
 
 function normalizeDate(val) {
-  if (val instanceof Date) {
+  if (val && typeof val.getTime === 'function') {
     return Utilities.formatDate(val, Session.getScriptTimeZone(), 'yyyy-MM-dd');
   }
   return String(val);
