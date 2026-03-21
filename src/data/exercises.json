@@ -1,0 +1,22 @@
+[
+  { "Name": "Dumbbell curl", "Category": "Biceps" },
+  { "Name": "Cable curl", "Category": "Biceps" },
+  { "Name": "Tricep pushdown", "Category": "Triceps" },
+  { "Name": "Overhead extension", "Category": "Triceps" },
+  { "Name": "Flat bench press", "Category": "Chest" },
+  { "Name": "45 degrees bench press", "Category": "Chest" },
+  { "Name": "Shoulder press", "Category": "Chest" },
+  { "Name": "Pull-up", "Category": "Pull" },
+  { "Name": "Row", "Category": "Pull" },
+  { "Name": "Squat", "Category": "Legs" },
+  { "Name": "Lunge", "Category": "Legs" },
+  { "Name": "Leg press", "Category": "Legs" },
+  { "Name": "Curl", "Category": "Legs" },
+  { "Name": "Extension", "Category": "Legs" },
+  { "Name": "Deadbug", "Category": "Abs" },
+  { "Name": "Cable lateral", "Category": "Abs" },
+  { "Name": "Lower back machine", "Category": "Abs" },
+  { "Name": "Crunch machine", "Category": "Abs" },
+  { "Name": "Reverse plank", "Category": "Abs" },
+  { "Name": "Crunch", "Category": "Abs" }
+]

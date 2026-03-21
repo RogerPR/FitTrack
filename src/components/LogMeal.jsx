@@ -1,0 +1,351 @@
+import { useState, useEffect, useMemo } from 'react'
+import ingredientsData from '../data/ingredients.json'
+import { getSavedMeals, saveMeal, logMeal } from '../api/sheets'
+
+function today() {
+  return new Date().toISOString().slice(0, 10)
+}
+
+export default function LogMeal({ onNavigate }) {
+  const [view, setView] = useState('list') // 'list' or 'create'
+  const [savedMeals, setSavedMeals] = useState({})
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [expandedMeal, setExpandedMeal] = useState(null)
+  const [toast, setToast] = useState(null)
+
+  function loadSavedMeals() {
+    setLoading(true)
+    setError(null)
+    getSavedMeals()
+      .then(data => setSavedMeals(data || {}))
+      .catch(err => setError(err.message))
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(() => { loadSavedMeals() }, [])
+
+  function showToast(msg) {
+    setToast(msg)
+    setTimeout(() => setToast(null), 2500)
+  }
+
+  function handleMealSaved() {
+    showToast('Meal saved!')
+    setView('list')
+    loadSavedMeals()
+  }
+
+  async function handleLogToday(mealId, rows) {
+    const date = today()
+    const logRows = rows.map(r => ({
+      Date: date,
+      Meal_ID: r.Meal_ID,
+      Meal_Name: r.Meal_Name,
+      Ingredient: r.Ingredient,
+      Qty_g: r.Qty_g,
+      Calories: r.Calories,
+      Protein: r.Protein,
+      Carbs: r.Carbs,
+      Fat: r.Fat,
+      Fiber: r.Fiber,
+      Sugar: r.Sugar,
+    }))
+    showToast('Logged to today!')
+    onNavigate('dashboard')
+    logMeal(logRows).catch(() => {})
+  }
+
+  if (view === 'create') {
+    return <CreateMeal onBack={() => setView('list')} onSaved={handleMealSaved} />
+  }
+
+  const mealEntries = Object.entries(savedMeals)
+
+  return (
+    <div className="p-4">
+      <h1 className="text-2xl font-bold mb-4">Meals</h1>
+
+      <button
+        onClick={() => setView('create')}
+        className="w-full bg-blue-600 text-white py-3 rounded-lg font-semibold mb-4 min-h-[48px] active:bg-blue-700"
+      >
+        + Create New Meal
+      </button>
+
+      {loading && <p className="text-gray-400">Loading saved meals...</p>}
+      {error && <p className="text-red-400">Error: {error}</p>}
+
+      {!loading && mealEntries.length === 0 && (
+        <p className="text-gray-400">No saved meals yet. Create your first one!</p>
+      )}
+
+      <div className="space-y-3">
+        {mealEntries.map(([mealId, rows]) => {
+          const name = rows[0].Meal_Name
+          const totals = rows.reduce((acc, r) => ({
+            calories: acc.calories + (r.Calories || 0),
+            protein: acc.protein + (r.Protein || 0),
+            carbs: acc.carbs + (r.Carbs || 0),
+            fat: acc.fat + (r.Fat || 0),
+          }), { calories: 0, protein: 0, carbs: 0, fat: 0 })
+          const expanded = expandedMeal === mealId
+
+          return (
+            <div key={mealId} className="bg-gray-800 rounded-lg overflow-hidden">
+              <button
+                onClick={() => setExpandedMeal(expanded ? null : mealId)}
+                className="w-full text-left p-4 min-h-[48px]"
+              >
+                <div className="flex justify-between items-start">
+                  <div>
+                    <p className="font-semibold text-lg">{name}</p>
+                    <p className="text-sm text-gray-400 mt-1">
+                      {Math.round(totals.calories)} cal &middot; {Math.round(totals.protein)}g P &middot; {Math.round(totals.carbs)}g C &middot; {Math.round(totals.fat)}g F
+                    </p>
+                  </div>
+                  <span className="text-gray-500 text-xl">{expanded ? '\u25B2' : '\u25BC'}</span>
+                </div>
+              </button>
+
+              {expanded && (
+                <div className="px-4 pb-4 border-t border-gray-700">
+                  {rows.map((r, i) => (
+                    <div key={i} className="flex justify-between text-sm py-2 border-b border-gray-700 last:border-0">
+                      <span className="text-gray-300">{r.Ingredient} ({r.Qty_g}g)</span>
+                      <span className="text-gray-400">{Math.round(r.Calories)} cal</span>
+                    </div>
+                  ))}
+                  <button
+                    onClick={() => handleLogToday(mealId, rows)}
+                    className="w-full mt-3 bg-green-600 text-white py-3 rounded-lg font-semibold min-h-[48px] active:bg-green-700"
+                  >
+                    Log to Today
+                  </button>
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      {toast && (
+        <div className="fixed bottom-24 left-4 right-4 bg-green-600 text-white text-center py-3 rounded-lg font-semibold">
+          {toast}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function CreateMeal({ onBack, onSaved }) {
+  const [search, setSearch] = useState('')
+  const [added, setAdded] = useState([]) // { ingredient, qty, macros }
+  const [qtyInput, setQtyInput] = useState(null) // ingredient being added
+  const [qtyValue, setQtyValue] = useState('100')
+  const [mealName, setMealName] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(null)
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return ingredientsData
+    const q = search.toLowerCase()
+    return ingredientsData.filter(i => i.Name.toLowerCase().includes(q))
+  }, [search])
+
+  function calcMacros(ingredient, qty) {
+    const factor = qty / 100
+    return {
+      Calories: +(ingredient.Calories_100g * factor).toFixed(1),
+      Protein: +(ingredient.Protein_100g * factor).toFixed(1),
+      Carbs: +(ingredient.Carbs_100g * factor).toFixed(1),
+      Fat: +(ingredient.Fat_100g * factor).toFixed(1),
+      Fiber: +(ingredient.Fiber_100g * factor).toFixed(1),
+      Sugar: +(ingredient.Sugar_100g * factor).toFixed(1),
+    }
+  }
+
+  function confirmAdd() {
+    const qty = parseInt(qtyValue) || 0
+    if (qty <= 0) return
+    const macros = calcMacros(qtyInput, qty)
+    setAdded([...added, { ingredient: qtyInput.Name, qty, macros }])
+    setQtyInput(null)
+    setQtyValue('100')
+    setSearch('')
+  }
+
+  function removeItem(index) {
+    setAdded(added.filter((_, i) => i !== index))
+  }
+
+  const totals = added.reduce((acc, item) => ({
+    calories: acc.calories + item.macros.Calories,
+    protein: acc.protein + item.macros.Protein,
+    carbs: acc.carbs + item.macros.Carbs,
+    fat: acc.fat + item.macros.Fat,
+  }), { calories: 0, protein: 0, carbs: 0, fat: 0 })
+
+  async function handleSave() {
+    if (!mealName.trim() || added.length === 0) return
+    setSaving(true)
+    setError(null)
+    const mealId = Date.now().toString()
+    const rows = added.map(item => ({
+      Meal_ID: mealId,
+      Meal_Name: mealName.trim(),
+      Ingredient: item.ingredient,
+      Qty_g: item.qty,
+      Calories: item.macros.Calories,
+      Protein: item.macros.Protein,
+      Carbs: item.macros.Carbs,
+      Fat: item.macros.Fat,
+      Fiber: item.macros.Fiber,
+      Sugar: item.macros.Sugar,
+    }))
+    try {
+      await saveMeal(rows)
+      onSaved()
+    } catch (err) {
+      setError(err.message)
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="p-4">
+      <div className="flex items-center gap-3 mb-4">
+        <button onClick={onBack} className="text-blue-400 min-w-[48px] min-h-[48px] flex items-center justify-center">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6">
+            <polyline points="15 18 9 12 15 6"/>
+          </svg>
+        </button>
+        <h1 className="text-2xl font-bold">Create Meal</h1>
+      </div>
+
+      {/* Running totals */}
+      <div className="bg-gray-800 rounded-lg p-3 mb-4 grid grid-cols-4 text-center">
+        <div>
+          <p className="text-xl font-bold">{Math.round(totals.calories)}</p>
+          <p className="text-xs text-gray-400">Cal</p>
+        </div>
+        <div>
+          <p className="text-xl font-bold text-blue-400">{Math.round(totals.protein)}g</p>
+          <p className="text-xs text-gray-400">Protein</p>
+        </div>
+        <div>
+          <p className="text-xl font-bold text-yellow-400">{Math.round(totals.carbs)}g</p>
+          <p className="text-xs text-gray-400">Carbs</p>
+        </div>
+        <div>
+          <p className="text-xl font-bold text-red-400">{Math.round(totals.fat)}g</p>
+          <p className="text-xs text-gray-400">Fat</p>
+        </div>
+      </div>
+
+      {/* Added ingredients */}
+      {added.length > 0 && (
+        <div className="mb-4 space-y-2">
+          {added.map((item, i) => (
+            <div key={i} className="bg-gray-800 rounded-lg p-3 flex justify-between items-center">
+              <div>
+                <p className="font-medium">{item.ingredient}</p>
+                <p className="text-sm text-gray-400">{item.qty}g &middot; {Math.round(item.macros.Calories)} cal &middot; {Math.round(item.macros.Protein)}g P</p>
+              </div>
+              <button
+                onClick={() => removeItem(i)}
+                className="text-red-400 min-w-[44px] min-h-[44px] flex items-center justify-center"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
+                  <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Quantity input modal */}
+      {qtyInput && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-800 rounded-lg p-6 w-full max-w-sm">
+            <h3 className="text-lg font-bold mb-1">{qtyInput.Name}</h3>
+            <p className="text-sm text-gray-400 mb-4">
+              Per 100g: {qtyInput.Calories_100g} cal &middot; {qtyInput.Protein_100g}g P &middot; {qtyInput.Carbs_100g}g C &middot; {qtyInput.Fat_100g}g F
+            </p>
+            <label className="text-sm text-gray-400">Quantity (grams)</label>
+            <input
+              type="number"
+              inputMode="numeric"
+              value={qtyValue}
+              onChange={e => setQtyValue(e.target.value)}
+              autoFocus
+              className="w-full bg-gray-700 rounded-lg p-3 mt-1 mb-4 text-lg text-white"
+            />
+            <div className="flex gap-3">
+              <button
+                onClick={() => { setQtyInput(null); setQtyValue('100') }}
+                className="flex-1 py-3 rounded-lg bg-gray-700 text-gray-300 min-h-[48px]"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmAdd}
+                className="flex-1 py-3 rounded-lg bg-blue-600 text-white font-semibold min-h-[48px] active:bg-blue-700"
+              >
+                Add
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Search ingredients */}
+      <input
+        type="text"
+        placeholder="Search ingredients..."
+        value={search}
+        onChange={e => setSearch(e.target.value)}
+        className="w-full bg-gray-800 rounded-lg p-3 mb-3 text-white placeholder-gray-500"
+      />
+
+      <div className="space-y-1 mb-24">
+        {filtered.map(ing => (
+          <button
+            key={ing.Name}
+            onClick={() => setQtyInput(ing)}
+            className="w-full text-left bg-gray-800 rounded-lg p-3 min-h-[48px] active:bg-gray-700"
+          >
+            <p className="font-medium">{ing.Name}</p>
+            <p className="text-sm text-gray-400">
+              {ing.Calories_100g} cal &middot; {ing.Protein_100g}g P &middot; {ing.Carbs_100g}g C &middot; {ing.Fat_100g}g F
+            </p>
+          </button>
+        ))}
+      </div>
+
+      {/* Save bar */}
+      {added.length > 0 && (
+        <div className="fixed bottom-16 left-0 right-0 bg-gray-900 border-t border-gray-800 p-4">
+          <div className="flex gap-3">
+            <input
+              type="text"
+              placeholder="Meal name"
+              value={mealName}
+              onChange={e => setMealName(e.target.value)}
+              className="flex-1 bg-gray-800 rounded-lg p-3 text-white placeholder-gray-500"
+            />
+            <button
+              onClick={handleSave}
+              disabled={saving || !mealName.trim()}
+              className="bg-green-600 text-white px-6 py-3 rounded-lg font-semibold min-h-[48px] active:bg-green-700 disabled:opacity-50"
+            >
+              {saving ? 'Saving...' : 'Save'}
+            </button>
+          </div>
+          {error && <p className="text-red-400 text-sm mt-2">Error: {error}. Tap Save to retry.</p>}
+        </div>
+      )}
+    </div>
+  )
+}

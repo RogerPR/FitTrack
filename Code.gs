@@ -1,0 +1,324 @@
+var SPREADSHEET_ID = SpreadsheetApp.getActiveSpreadsheet().getId();
+
+function doPost(e) {
+  try {
+    var body = JSON.parse(e.postData.contents);
+    switch (body.action) {
+      case 'getIngredients':       return respond(handleGetIngredients());
+      case 'getSavedMeals':        return respond(handleGetSavedMeals());
+      case 'saveMeal':             return respond(handleSaveMeal(body));
+      case 'logMeal':              return respond(handleLogMeal(body));
+      case 'getDailyMeals':        return respond(handleGetDailyMeals(body));
+      case 'deleteDailyMeal':      return respond(handleDeleteDailyMeal(body));
+      case 'getExercises':         return respond(handleGetExercises());
+      case 'getSavedRoutines':     return respond(handleGetSavedRoutines());
+      case 'saveRoutine':          return respond(handleSaveRoutine(body));
+      case 'logWorkout':           return respond(handleLogWorkout(body));
+      case 'getDailyWorkout':      return respond(handleGetDailyWorkout(body));
+      case 'getLastWorkoutWeights': return respond(handleGetLastWorkoutWeights(body));
+      default: return respond({ success: false, error: 'Unknown action: ' + body.action });
+    }
+  } catch (err) {
+    return respond({ success: false, error: err.message });
+  }
+}
+
+function respond(data) {
+  return ContentService
+    .createTextOutput(JSON.stringify(data))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+// --- Helpers ---
+
+function getSheet(name) {
+  return SpreadsheetApp.getActiveSpreadsheet().getSheetByName(name);
+}
+
+function getSheetData(name) {
+  var sheet = getSheet(name);
+  var data = sheet.getDataRange().getValues();
+  if (data.length < 2) return [];
+  var headers = data[0];
+  var rows = [];
+  for (var i = 1; i < data.length; i++) {
+    var obj = {};
+    for (var j = 0; j < headers.length; j++) {
+      var val = data[i][j];
+      if (val instanceof Date) val = normalizeDate(val);
+      obj[headers[j]] = val;
+    }
+    rows.push(obj);
+  }
+  return rows;
+}
+
+function normalizeDate(val) {
+  if (val instanceof Date) {
+    return Utilities.formatDate(val, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
+  return String(val);
+}
+
+function appendRows(sheetName, rows) {
+  var sheet = getSheet(sheetName);
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  for (var i = 0; i < rows.length; i++) {
+    var row = [];
+    for (var j = 0; j < headers.length; j++) {
+      row.push(rows[i][headers[j]] !== undefined ? rows[i][headers[j]] : '');
+    }
+    sheet.appendRow(row);
+  }
+}
+
+function groupBy(rows, key) {
+  var groups = {};
+  for (var i = 0; i < rows.length; i++) {
+    var k = rows[i][key];
+    if (!groups[k]) groups[k] = [];
+    groups[k].push(rows[i]);
+  }
+  return groups;
+}
+
+// --- Setup (run once) ---
+
+function setup() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  var tabs = {
+    'Ingredients':     ['Name', 'Calories_100g', 'Protein_100g', 'Carbs_100g', 'Fat_100g', 'Fiber_100g', 'Sugar_100g'],
+    'Saved Meals':     ['Meal_ID', 'Meal_Name', 'Ingredient', 'Qty_g', 'Calories', 'Protein', 'Carbs', 'Fat', 'Fiber', 'Sugar'],
+    'Daily Meals':     ['Date', 'Meal_ID', 'Meal_Name', 'Ingredient', 'Qty_g', 'Calories', 'Protein', 'Carbs', 'Fat', 'Fiber', 'Sugar'],
+    'Exercises':       ['Name', 'Category'],
+    'Saved Routines':  ['Routine_ID', 'Routine_Name', 'Exercise', 'Order'],
+    'Daily Workouts':  ['Date', 'Routine_ID', 'Routine_Name', 'Exercise', 'Set_Num', 'Reps', 'Weight_kg']
+  };
+
+  var names = Object.keys(tabs);
+  for (var i = 0; i < names.length; i++) {
+    var name = names[i];
+    var sheet = ss.getSheetByName(name);
+    if (!sheet) sheet = ss.insertSheet(name);
+    var headers = tabs[name];
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  }
+}
+
+// --- Populate data (run once from script editor) ---
+
+function populateIngredients() {
+  var sheet = getSheet('Ingredients');
+  var existing = sheet.getDataRange().getValues();
+  if (existing.length > 1) {
+    sheet.getRange(2, 1, existing.length - 1, existing[0].length).clear();
+  }
+
+  var data = [
+    ['Chicken breast', 165, 31, 0, 3.6, 0, 0],
+    ['White rice', 130, 2.7, 28, 0.3, 0.4, 0],
+    ['Olive oil', 884, 0, 0, 100, 0, 0],
+    ['Banana', 89, 1.1, 23, 0.3, 2.6, 12],
+    ['Oats', 389, 17, 66, 6.9, 11, 1],
+    ['Whole wheat bread', 247, 13, 41, 3.4, 7, 6],
+    ['Eggs', 155, 13, 1.1, 11, 0, 1.1],
+    ['Milk', 42, 3.4, 5, 1, 0, 5],
+    ['Coconut oil', 862, 0, 0, 100, 0, 0],
+    ['Coffee', 2, 0.1, 0, 0, 0, 0],
+    ['White fish', 90, 18, 0, 1.3, 0, 0],
+    ['Salmon', 208, 20, 0, 13, 0, 0],
+    ['Shrimp', 99, 24, 0.2, 0.3, 0, 0],
+    ['Beef', 250, 26, 0, 15, 0, 0],
+    ['Lamb', 294, 25, 0, 21, 0, 0],
+    ['Beef hamburger meat', 254, 17, 0, 20, 0, 0],
+    ['Potatoes', 77, 2, 17, 0.1, 2.2, 0.8],
+    ['Chicken broth', 7, 1.1, 0.2, 0.2, 0, 0.1],
+    ['Vegetable cream', 195, 1.5, 5, 19, 0.3, 3],
+    ['Pumpkin', 26, 1, 6.5, 0.1, 0.5, 2.8],
+    ['Pumpkin and potato cream', 45, 1.2, 8, 1, 1, 2],
+    ['Ham', 145, 21, 1.5, 6, 0, 1],
+    ['Cheese', 402, 25, 1.3, 33, 0, 0.5],
+    ['Protein yoghurt', 70, 10, 4, 1.5, 0, 3.5]
+  ];
+
+  sheet.getRange(2, 1, data.length, data[0].length).setValues(data);
+}
+
+function populateExercises() {
+  var sheet = getSheet('Exercises');
+  var existing = sheet.getDataRange().getValues();
+  if (existing.length > 1) {
+    sheet.getRange(2, 1, existing.length - 1, existing[0].length).clear();
+  }
+
+  var data = [
+    ['Dumbbell curl', 'Biceps'],
+    ['Cable curl', 'Biceps'],
+    ['Tricep pushdown', 'Triceps'],
+    ['Overhead extension', 'Triceps'],
+    ['Flat bench press', 'Chest'],
+    ['45 degrees bench press', 'Chest'],
+    ['Shoulder press', 'Chest'],
+    ['Pull-up', 'Pull'],
+    ['Row', 'Pull'],
+    ['Squat', 'Legs'],
+    ['Lunge', 'Legs'],
+    ['Leg press', 'Legs'],
+    ['Curl', 'Legs'],
+    ['Extension', 'Legs'],
+    ['Deadbug', 'Abs'],
+    ['Cable lateral', 'Abs'],
+    ['Lower back machine', 'Abs'],
+    ['Crunch machine', 'Abs'],
+    ['Reverse plank', 'Abs'],
+    ['Crunch', 'Abs']
+  ];
+
+  sheet.getRange(2, 1, data.length, data[0].length).setValues(data);
+}
+
+function populateStarterRoutines() {
+  var sheet = getSheet('Saved Routines');
+  var existing = sheet.getDataRange().getValues();
+  if (existing.length > 1) {
+    sheet.getRange(2, 1, existing.length - 1, existing[0].length).clear();
+  }
+
+  var data = [
+    ['push1', 'Push Day', 'Flat bench press', 1],
+    ['push1', 'Push Day', '45 degrees bench press', 2],
+    ['push1', 'Push Day', 'Shoulder press', 3],
+    ['push1', 'Push Day', 'Tricep pushdown', 4],
+    ['push1', 'Push Day', 'Overhead extension', 5],
+
+    ['pull1', 'Pull Day', 'Pull-up', 1],
+    ['pull1', 'Pull Day', 'Row', 2],
+    ['pull1', 'Pull Day', 'Dumbbell curl', 3],
+    ['pull1', 'Pull Day', 'Cable curl', 4],
+
+    ['legs1', 'Leg Day', 'Squat', 1],
+    ['legs1', 'Leg Day', 'Leg press', 2],
+    ['legs1', 'Leg Day', 'Lunge', 3],
+    ['legs1', 'Leg Day', 'Curl', 4],
+    ['legs1', 'Leg Day', 'Extension', 5]
+  ];
+
+  sheet.getRange(2, 1, data.length, data[0].length).setValues(data);
+}
+
+// --- Action Handlers ---
+
+function handleGetIngredients() {
+  return { success: true, data: getSheetData('Ingredients') };
+}
+
+function handleGetSavedMeals() {
+  var rows = getSheetData('Saved Meals');
+  return { success: true, data: groupBy(rows, 'Meal_ID') };
+}
+
+function handleSaveMeal(body) {
+  appendRows('Saved Meals', body.rows);
+  return { success: true, data: null };
+}
+
+function handleLogMeal(body) {
+  appendRows('Daily Meals', body.rows);
+  return { success: true, data: null };
+}
+
+function handleGetDailyMeals(body) {
+  var rows = getSheetData('Daily Meals');
+  var filtered = [];
+  for (var i = 0; i < rows.length; i++) {
+    if (normalizeDate(rows[i].Date) === body.date) {
+      filtered.push(rows[i]);
+    }
+  }
+  return { success: true, data: groupBy(filtered, 'Meal_ID') };
+}
+
+function handleDeleteDailyMeal(body) {
+  var sheet = getSheet('Daily Meals');
+  var data = sheet.getDataRange().getValues();
+  if (data.length < 2) return { success: true, data: null };
+
+  var headers = data[0];
+  var dateCol = headers.indexOf('Date');
+  var mealIdCol = headers.indexOf('Meal_ID');
+
+  var rowsToDelete = [];
+  for (var i = 1; i < data.length; i++) {
+    var rowDate = normalizeDate(data[i][dateCol]);
+    var rowMealId = String(data[i][mealIdCol]);
+    if (rowDate === body.date && rowMealId === String(body.mealId)) {
+      rowsToDelete.push(i + 1);
+    }
+  }
+
+  // Delete bottom-to-top to avoid index shifting
+  for (var j = rowsToDelete.length - 1; j >= 0; j--) {
+    sheet.deleteRow(rowsToDelete[j]);
+  }
+
+  return { success: true, data: null };
+}
+
+function handleGetExercises() {
+  return { success: true, data: getSheetData('Exercises') };
+}
+
+function handleGetSavedRoutines() {
+  var rows = getSheetData('Saved Routines');
+  return { success: true, data: groupBy(rows, 'Routine_ID') };
+}
+
+function handleSaveRoutine(body) {
+  appendRows('Saved Routines', body.rows);
+  return { success: true, data: null };
+}
+
+function handleLogWorkout(body) {
+  appendRows('Daily Workouts', body.rows);
+  return { success: true, data: null };
+}
+
+function handleGetDailyWorkout(body) {
+  var rows = getSheetData('Daily Workouts');
+  var filtered = [];
+  for (var i = 0; i < rows.length; i++) {
+    if (normalizeDate(rows[i].Date) === body.date) {
+      filtered.push(rows[i]);
+    }
+  }
+  return { success: true, data: groupBy(filtered, 'Routine_ID') };
+}
+
+function handleGetLastWorkoutWeights(body) {
+  var rows = getSheetData('Daily Workouts');
+  var matching = [];
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i].Routine_ID) === String(body.routineId)) {
+      matching.push(rows[i]);
+    }
+  }
+
+  if (matching.length === 0) return { success: true, data: [] };
+
+  // Find the most recent date
+  var latestDate = '';
+  for (var j = 0; j < matching.length; j++) {
+    var d = normalizeDate(matching[j].Date);
+    if (d > latestDate) latestDate = d;
+  }
+
+  var result = [];
+  for (var k = 0; k < matching.length; k++) {
+    if (normalizeDate(matching[k].Date) === latestDate) {
+      result.push(matching[k]);
+    }
+  }
+
+  return { success: true, data: result };
+}
