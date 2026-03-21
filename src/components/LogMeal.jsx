@@ -59,12 +59,17 @@ export default function LogMeal({ onNavigate }) {
     return <CreateMeal onBack={() => setView('list')} onSaved={handleMealSaved} />
   }
 
+  function navigateAndReset(tab) {
+    setView('list')
+    onNavigate(tab)
+  }
+
   if (view === 'ingredient') {
-    return <LogIngredientForm onBack={() => setView('list')} onNavigate={onNavigate} />
+    return <LogIngredientForm onBack={() => setView('list')} onNavigate={navigateAndReset} />
   }
 
   if (view === 'custom') {
-    return <CustomMealForm onBack={() => setView('list')} onNavigate={onNavigate} />
+    return <CustomMealForm onBack={() => setView('list')} onNavigate={navigateAndReset} />
   }
 
   const mealEntries = Object.entries(savedMeals)
