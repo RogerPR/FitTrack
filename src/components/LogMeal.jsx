@@ -7,7 +7,7 @@ function today() {
 }
 
 export default function LogMeal({ onNavigate }) {
-  const [view, setView] = useState('list') // 'list' or 'create'
+  const [view, setView] = useState('list') // 'list', 'create', or 'custom'
   const [savedMeals, setSavedMeals] = useState({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -60,6 +60,10 @@ export default function LogMeal({ onNavigate }) {
     return <CreateMeal onBack={() => setView('list')} onSaved={handleMealSaved} />
   }
 
+  if (view === 'custom') {
+    return <CustomMealForm onBack={() => setView('list')} onNavigate={onNavigate} />
+  }
+
   const mealEntries = Object.entries(savedMeals)
 
   return (
@@ -68,9 +72,15 @@ export default function LogMeal({ onNavigate }) {
 
       <button
         onClick={() => setView('create')}
-        className="w-full bg-blue-600 text-white py-3 rounded-lg font-semibold mb-4 min-h-[48px] active:bg-blue-700"
+        className="w-full bg-blue-600 text-white py-3 rounded-lg font-semibold mb-2 min-h-[48px] active:bg-blue-700"
       >
         + Create New Meal
+      </button>
+      <button
+        onClick={() => setView('custom')}
+        className="w-full bg-gray-700 text-white py-3 rounded-lg font-semibold mb-4 min-h-[48px] active:bg-gray-600"
+      >
+        Log Custom Meal
       </button>
 
       {loading && <p className="text-gray-400">Loading saved meals...</p>}
@@ -134,6 +144,102 @@ export default function LogMeal({ onNavigate }) {
           {toast}
         </div>
       )}
+    </div>
+  )
+}
+
+function CustomMealForm({ onBack, onNavigate }) {
+  const [name, setName] = useState('')
+  const [calories, setCalories] = useState('')
+  const [protein, setProtein] = useState('')
+  const [carbs, setCarbs] = useState('')
+  const [fat, setFat] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(null)
+
+  async function handleSave() {
+    if (!name.trim() || !calories) return
+    setSaving(true)
+    setError(null)
+    const mealId = 'custom_' + Date.now()
+    const date = today()
+    const rows = [{
+      Date: date,
+      Meal_ID: mealId,
+      Meal_Name: name.trim(),
+      Ingredient: 'Custom entry',
+      Qty_g: 0,
+      Calories: parseFloat(calories) || 0,
+      Protein: parseFloat(protein) || 0,
+      Carbs: parseFloat(carbs) || 0,
+      Fat: parseFloat(fat) || 0,
+      Fiber: 0,
+      Sugar: 0,
+    }]
+    try {
+      onNavigate('dashboard')
+      logMeal(rows).catch(() => {})
+    } catch (err) {
+      setError(err.message)
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="p-4">
+      <div className="flex items-center gap-3 mb-4">
+        <button onClick={onBack} className="text-blue-400 min-w-[48px] min-h-[48px] flex items-center justify-center">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6">
+            <polyline points="15 18 9 12 15 6"/>
+          </svg>
+        </button>
+        <h1 className="text-2xl font-bold">Log Custom Meal</h1>
+      </div>
+
+      <div className="space-y-3">
+        <div>
+          <label className="text-sm text-gray-400">Meal Name</label>
+          <input
+            type="text"
+            value={name}
+            onChange={e => setName(e.target.value)}
+            placeholder="e.g. Restaurant lunch"
+            className="w-full bg-gray-800 rounded-lg p-3 mt-1 text-white placeholder-gray-500"
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-sm text-gray-400">Calories</label>
+            <input type="number" inputMode="numeric" value={calories} onChange={e => setCalories(e.target.value)}
+              className="w-full bg-gray-800 rounded-lg p-3 mt-1 text-white" placeholder="0" />
+          </div>
+          <div>
+            <label className="text-sm text-gray-400">Protein (g)</label>
+            <input type="number" inputMode="decimal" value={protein} onChange={e => setProtein(e.target.value)}
+              className="w-full bg-gray-800 rounded-lg p-3 mt-1 text-white" placeholder="0" />
+          </div>
+          <div>
+            <label className="text-sm text-gray-400">Carbs (g)</label>
+            <input type="number" inputMode="decimal" value={carbs} onChange={e => setCarbs(e.target.value)}
+              className="w-full bg-gray-800 rounded-lg p-3 mt-1 text-white" placeholder="0" />
+          </div>
+          <div>
+            <label className="text-sm text-gray-400">Fat (g)</label>
+            <input type="number" inputMode="decimal" value={fat} onChange={e => setFat(e.target.value)}
+              className="w-full bg-gray-800 rounded-lg p-3 mt-1 text-white" placeholder="0" />
+          </div>
+        </div>
+      </div>
+
+      <button
+        onClick={handleSave}
+        disabled={saving || !name.trim() || !calories}
+        className="w-full mt-6 bg-green-600 text-white py-3 rounded-lg font-semibold min-h-[48px] active:bg-green-700 disabled:opacity-50"
+      >
+        {saving ? 'Saving...' : 'Log to Today'}
+      </button>
+
+      {error && <p className="text-red-400 text-sm mt-2">Error: {error}</p>}
     </div>
   )
 }

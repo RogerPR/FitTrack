@@ -16,6 +16,11 @@ function doPost(e) {
       case 'logWorkout':           return respond(handleLogWorkout(body));
       case 'getDailyWorkout':      return respond(handleGetDailyWorkout(body));
       case 'getLastWorkoutWeights': return respond(handleGetLastWorkoutWeights(body));
+      case 'getGoals':             return respond(handleGetGoals());
+      case 'saveGoals':            return respond(handleSaveGoals(body));
+      case 'getBodyLog':           return respond(handleGetBodyLog());
+      case 'logBody':              return respond(handleLogBody(body));
+      case 'deleteBodyLog':        return respond(handleDeleteBodyLog(body));
       default: return respond({ success: false, error: 'Unknown action: ' + body.action });
     }
   } catch (err) {
@@ -93,7 +98,9 @@ function setup() {
     'Daily Meals':     ['Date', 'Meal_ID', 'Meal_Name', 'Ingredient', 'Qty_g', 'Calories', 'Protein', 'Carbs', 'Fat', 'Fiber', 'Sugar'],
     'Exercises':       ['Name', 'Category'],
     'Saved Routines':  ['Routine_ID', 'Routine_Name', 'Exercise', 'Order'],
-    'Daily Workouts':  ['Date', 'Routine_ID', 'Routine_Name', 'Exercise', 'Set_Num', 'Reps', 'Weight_kg']
+    'Daily Workouts':  ['Date', 'Routine_ID', 'Routine_Name', 'Exercise', 'Set_Num', 'Reps', 'Weight_kg'],
+    'Goals':           ['Calories', 'Protein', 'Carbs', 'Fat'],
+    'Body Log':        ['Date', 'Weight_kg', 'Fat_pct']
   };
 
   var names = Object.keys(tabs);
@@ -321,4 +328,61 @@ function handleGetLastWorkoutWeights(body) {
   }
 
   return { success: true, data: result };
+}
+
+function handleGetGoals() {
+  var sheet = getSheet('Goals');
+  var data = sheet.getDataRange().getValues();
+  if (data.length < 2) return { success: true, data: null };
+  var headers = data[0];
+  var obj = {};
+  for (var j = 0; j < headers.length; j++) {
+    obj[headers[j]] = data[1][j];
+  }
+  return { success: true, data: obj };
+}
+
+function handleSaveGoals(body) {
+  var sheet = getSheet('Goals');
+  var data = sheet.getDataRange().getValues();
+  if (data.length > 1) {
+    sheet.getRange(2, 1, data.length - 1, data[0].length).clear();
+  }
+  var headers = data[0];
+  var row = [];
+  for (var j = 0; j < headers.length; j++) {
+    row.push(body.goals[headers[j]] !== undefined ? body.goals[headers[j]] : '');
+  }
+  sheet.appendRow(row);
+  return { success: true, data: null };
+}
+
+function handleGetBodyLog() {
+  return { success: true, data: getSheetData('Body Log') };
+}
+
+function handleLogBody(body) {
+  appendRows('Body Log', [body.entry]);
+  return { success: true, data: null };
+}
+
+function handleDeleteBodyLog(body) {
+  var sheet = getSheet('Body Log');
+  var data = sheet.getDataRange().getValues();
+  if (data.length < 2) return { success: true, data: null };
+
+  var headers = data[0];
+  var dateCol = headers.indexOf('Date');
+  var weightCol = headers.indexOf('Weight_kg');
+  var fatCol = headers.indexOf('Fat_pct');
+
+  for (var i = data.length - 1; i >= 1; i--) {
+    var rowDate = normalizeDate(data[i][dateCol]);
+    if (rowDate === body.date && data[i][weightCol] == body.weight && data[i][fatCol] == body.fat) {
+      sheet.deleteRow(i + 1);
+      break;
+    }
+  }
+
+  return { success: true, data: null };
 }

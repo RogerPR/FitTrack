@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getDailyMeals, deleteDailyMeal, getDailyWorkout } from '../api/sheets'
+import { getDailyMeals, deleteDailyMeal, getDailyWorkout, getGoals } from '../api/sheets'
 
 function today() {
   return new Date().toISOString().slice(0, 10)
@@ -18,14 +18,16 @@ export default function Dashboard({ onNavigate }) {
   const [toast, setToast] = useState(null)
   const [deleting, setDeleting] = useState(null)
   const [workout, setWorkout] = useState({})
+  const [goals, setGoals] = useState(null)
 
   function loadData(d) {
     setLoading(true)
     setError(null)
-    Promise.all([getDailyMeals(d), getDailyWorkout(d)])
-      .then(([mealsData, workoutData]) => {
+    Promise.all([getDailyMeals(d), getDailyWorkout(d), getGoals()])
+      .then(([mealsData, workoutData, goalsData]) => {
         setMeals(mealsData || {})
         setWorkout(workoutData || {})
+        setGoals(goalsData)
       })
       .catch(err => setError(err.message))
       .finally(() => setLoading(false))
@@ -105,20 +107,41 @@ export default function Dashboard({ onNavigate }) {
 
       {/* Macro totals */}
       <div className="bg-gray-800 rounded-lg p-4 mb-4">
-        <p className="text-4xl font-bold text-center mb-3">{Math.round(totals.calories)}</p>
-        <p className="text-center text-gray-400 text-sm mb-4">calories</p>
+        <p className="text-4xl font-bold text-center mb-1">{Math.round(totals.calories)}</p>
+        <p className="text-center text-gray-400 text-sm mb-1">calories{goals?.Calories ? ` / ${goals.Calories}` : ''}</p>
+        {goals?.Calories > 0 && (
+          <div className="w-2/3 mx-auto h-2 bg-gray-700 rounded-full mb-4">
+            <div className="h-2 bg-green-500 rounded-full" style={{ width: `${Math.min(100, (totals.calories / goals.Calories) * 100)}%` }} />
+          </div>
+        )}
+        {!goals?.Calories && <div className="mb-4" />}
         <div className="grid grid-cols-3 text-center">
           <div>
             <p className="text-2xl font-bold text-blue-400">{Math.round(totals.protein)}g</p>
-            <p className="text-xs text-gray-400">Protein</p>
+            <p className="text-xs text-gray-400">Protein{goals?.Protein ? ` / ${goals.Protein}g` : ''}</p>
+            {goals?.Protein > 0 && (
+              <div className="h-2 bg-gray-700 rounded-full mt-1 mx-2">
+                <div className="h-2 bg-blue-400 rounded-full" style={{ width: `${Math.min(100, (totals.protein / goals.Protein) * 100)}%` }} />
+              </div>
+            )}
           </div>
           <div>
             <p className="text-2xl font-bold text-yellow-400">{Math.round(totals.carbs)}g</p>
-            <p className="text-xs text-gray-400">Carbs</p>
+            <p className="text-xs text-gray-400">Carbs{goals?.Carbs ? ` / ${goals.Carbs}g` : ''}</p>
+            {goals?.Carbs > 0 && (
+              <div className="h-2 bg-gray-700 rounded-full mt-1 mx-2">
+                <div className="h-2 bg-yellow-400 rounded-full" style={{ width: `${Math.min(100, (totals.carbs / goals.Carbs) * 100)}%` }} />
+              </div>
+            )}
           </div>
           <div>
             <p className="text-2xl font-bold text-red-400">{Math.round(totals.fat)}g</p>
-            <p className="text-xs text-gray-400">Fat</p>
+            <p className="text-xs text-gray-400">Fat{goals?.Fat ? ` / ${goals.Fat}g` : ''}</p>
+            {goals?.Fat > 0 && (
+              <div className="h-2 bg-gray-700 rounded-full mt-1 mx-2">
+                <div className="h-2 bg-red-400 rounded-full" style={{ width: `${Math.min(100, (totals.fat / goals.Fat) * 100)}%` }} />
+              </div>
+            )}
           </div>
         </div>
       </div>
