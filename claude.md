@@ -1,4 +1,4 @@
-# FitTrack — Personal Fitness & Nutrition Tracker
+# FitTrack — Personal Fitness & Nutrition Tracker -
 
 ## Project Overview
 A personal, mobile-first fitness and nutrition tracker for a single user. Static frontend hosted on GitHub Pages, with Google Apps Script as the backend API proxying all reads/writes to a Google Sheet.
