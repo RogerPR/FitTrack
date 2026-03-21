@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { getDailyMeals, deleteDailyMeal, getDailyWorkout, getGoals } from '../api/sheets'
+import SuggestMeals from './SuggestMeals'
 
 function today() {
   return new Date().toISOString().slice(0, 10)
@@ -19,6 +20,7 @@ export default function Dashboard({ onNavigate, refreshKey }) {
   const [deleting, setDeleting] = useState(null)
   const [workout, setWorkout] = useState({})
   const [goals, setGoals] = useState(null)
+  const [showSuggest, setShowSuggest] = useState(false)
 
   function loadData(d) {
     setLoading(true)
@@ -75,6 +77,16 @@ export default function Dashboard({ onNavigate, refreshKey }) {
   }, { calories: 0, protein: 0, carbs: 0, fat: 0 })
 
   const isToday = date === today()
+
+  if (showSuggest) {
+    return (
+      <SuggestMeals
+        goals={goals}
+        todayTotals={totals}
+        onClose={() => { setShowSuggest(false); loadData(date) }}
+      />
+    )
+  }
 
   return (
     <div className="p-4">
@@ -161,6 +173,16 @@ export default function Dashboard({ onNavigate, refreshKey }) {
           Log Workout
         </button>
       </div>
+
+      {/* Suggest Meals button */}
+      {goals?.Calories > 0 && (
+        <button
+          onClick={() => setShowSuggest(true)}
+          className="w-full bg-amber-600 text-white py-3 rounded-lg font-semibold min-h-[48px] active:bg-amber-700 mb-4"
+        >
+          Suggest Meals
+        </button>
+      )}
 
       {/* Today's meals */}
       <h2 className="text-lg font-semibold mb-3">

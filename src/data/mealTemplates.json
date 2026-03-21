@@ -1,0 +1,120 @@
+[
+  { "id": "b1", "name": "Oats with Banana & Milk", "category": "breakfast", "ingredients": [
+    { "name": "Oats", "qty_g": 80 },
+    { "name": "Banana", "qty_g": 120 },
+    { "name": "Milk", "qty_g": 200 }
+  ]},
+  { "id": "b2", "name": "Eggs on Toast", "category": "breakfast", "ingredients": [
+    { "name": "Eggs", "qty_g": 120 },
+    { "name": "Whole wheat bread", "qty_g": 80 }
+  ]},
+  { "id": "b3", "name": "Protein Yoghurt Bowl", "category": "breakfast", "ingredients": [
+    { "name": "Protein yoghurt", "qty_g": 250 },
+    { "name": "Banana", "qty_g": 100 }
+  ]},
+  { "id": "b4", "name": "Ham & Cheese Toast", "category": "breakfast", "ingredients": [
+    { "name": "Whole wheat bread", "qty_g": 80 },
+    { "name": "Ham", "qty_g": 60 },
+    { "name": "Cheese", "qty_g": 30 }
+  ]},
+  { "id": "b5", "name": "Scrambled Eggs + Ham", "category": "breakfast", "ingredients": [
+    { "name": "Eggs", "qty_g": 150 },
+    { "name": "Ham", "qty_g": 60 },
+    { "name": "Olive oil", "qty_g": 5 }
+  ]},
+  { "id": "b6", "name": "Oats + Protein Yoghurt", "category": "breakfast", "ingredients": [
+    { "name": "Oats", "qty_g": 60 },
+    { "name": "Protein yoghurt", "qty_g": 200 }
+  ]},
+
+  { "id": "l1", "name": "Chicken & Rice", "category": "lunch", "ingredients": [
+    { "name": "Chicken breast", "qty_g": 200 },
+    { "name": "White rice", "qty_g": 150 },
+    { "name": "Olive oil", "qty_g": 10 }
+  ]},
+  { "id": "l2", "name": "Salmon & Potatoes", "category": "lunch", "ingredients": [
+    { "name": "Salmon", "qty_g": 180 },
+    { "name": "Potatoes", "qty_g": 250 },
+    { "name": "Olive oil", "qty_g": 10 }
+  ]},
+  { "id": "l3", "name": "Beef & Rice", "category": "lunch", "ingredients": [
+    { "name": "Beef", "qty_g": 180 },
+    { "name": "White rice", "qty_g": 150 },
+    { "name": "Olive oil", "qty_g": 5 }
+  ]},
+  { "id": "l4", "name": "Shrimp & Rice", "category": "lunch", "ingredients": [
+    { "name": "Shrimp", "qty_g": 200 },
+    { "name": "White rice", "qty_g": 150 },
+    { "name": "Olive oil", "qty_g": 10 }
+  ]},
+  { "id": "l5", "name": "White Fish & Potatoes", "category": "lunch", "ingredients": [
+    { "name": "White fish", "qty_g": 200 },
+    { "name": "Potatoes", "qty_g": 250 },
+    { "name": "Olive oil", "qty_g": 10 }
+  ]},
+  { "id": "l6", "name": "Chicken & Potatoes", "category": "lunch", "ingredients": [
+    { "name": "Chicken breast", "qty_g": 200 },
+    { "name": "Potatoes", "qty_g": 300 },
+    { "name": "Olive oil", "qty_g": 10 }
+  ]},
+  { "id": "l7", "name": "Ham & Cheese Sandwich", "category": "lunch", "ingredients": [
+    { "name": "Whole wheat bread", "qty_g": 100 },
+    { "name": "Ham", "qty_g": 80 },
+    { "name": "Cheese", "qty_g": 40 }
+  ]},
+
+  { "id": "d1", "name": "Grilled Chicken & Rice", "category": "dinner", "ingredients": [
+    { "name": "Chicken breast", "qty_g": 180 },
+    { "name": "White rice", "qty_g": 130 },
+    { "name": "Olive oil", "qty_g": 10 }
+  ]},
+  { "id": "d2", "name": "Lamb & Potatoes", "category": "dinner", "ingredients": [
+    { "name": "Lamb", "qty_g": 180 },
+    { "name": "Potatoes", "qty_g": 250 },
+    { "name": "Olive oil", "qty_g": 5 }
+  ]},
+  { "id": "d3", "name": "Pumpkin Soup + Bread", "category": "dinner", "ingredients": [
+    { "name": "Pumpkin and potato cream", "qty_g": 300 },
+    { "name": "Whole wheat bread", "qty_g": 60 },
+    { "name": "Vegetable cream", "qty_g": 30 }
+  ]},
+  { "id": "d4", "name": "Salmon & Rice", "category": "dinner", "ingredients": [
+    { "name": "Salmon", "qty_g": 170 },
+    { "name": "White rice", "qty_g": 130 },
+    { "name": "Olive oil", "qty_g": 5 }
+  ]},
+  { "id": "d5", "name": "Beef Burger & Potatoes", "category": "dinner", "ingredients": [
+    { "name": "Beef hamburger meat", "qty_g": 180 },
+    { "name": "Potatoes", "qty_g": 250 },
+    { "name": "Olive oil", "qty_g": 5 }
+  ]},
+  { "id": "d6", "name": "Shrimp & Rice", "category": "dinner", "ingredients": [
+    { "name": "Shrimp", "qty_g": 180 },
+    { "name": "White rice", "qty_g": 130 },
+    { "name": "Olive oil", "qty_g": 10 }
+  ]},
+  { "id": "d7", "name": "White Fish & Rice", "category": "dinner", "ingredients": [
+    { "name": "White fish", "qty_g": 200 },
+    { "name": "White rice", "qty_g": 130 },
+    { "name": "Olive oil", "qty_g": 10 }
+  ]},
+
+  { "id": "s1", "name": "Banana + Protein Yoghurt", "category": "snack", "ingredients": [
+    { "name": "Banana", "qty_g": 120 },
+    { "name": "Protein yoghurt", "qty_g": 150 }
+  ]},
+  { "id": "s2", "name": "Eggs", "category": "snack", "ingredients": [
+    { "name": "Eggs", "qty_g": 120 }
+  ]},
+  { "id": "s3", "name": "Ham & Cheese Roll-up", "category": "snack", "ingredients": [
+    { "name": "Ham", "qty_g": 60 },
+    { "name": "Cheese", "qty_g": 30 }
+  ]},
+  { "id": "s4", "name": "Oats Mini Bowl", "category": "snack", "ingredients": [
+    { "name": "Oats", "qty_g": 40 },
+    { "name": "Milk", "qty_g": 100 }
+  ]},
+  { "id": "s5", "name": "Protein Yoghurt", "category": "snack", "ingredients": [
+    { "name": "Protein yoghurt", "qty_g": 200 }
+  ]}
+]
