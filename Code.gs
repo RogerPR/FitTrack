@@ -1,5 +1,6 @@
 var SPREADSHEET_ID = SpreadsheetApp.getActiveSpreadsheet().getId();
 var API_KEY = 'cacaolat'; // Set this to your password
+var GEMINI_API_KEY = 'your-gemini-api-key-here';
 
 function doPost(e) {
   try {
@@ -26,6 +27,7 @@ function doPost(e) {
       case 'logBody':              return respond(handleLogBody(body));
       case 'deleteBodyLog':        return respond(handleDeleteBodyLog(body));
       case 'getMealUsageCounts':   return respond(handleGetMealUsageCounts());
+      case 'analyzeFood':          return respond(handleAnalyzeFood(body));
       default: return respond({ success: false, error: 'Unknown action: ' + body.action });
     }
   } catch (err) {
@@ -384,6 +386,39 @@ function handleGetMealUsageCounts() {
     }
   }
   return { success: true, data: counts };
+}
+
+function handleAnalyzeFood(body) {
+  if (!body.image) return { success: false, error: 'No image provided' };
+
+  var url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + GEMINI_API_KEY;
+  var payload = {
+    contents: [{
+      parts: [
+        { text: 'You are a nutrition estimation assistant. Analyze this photo of food and estimate the nutritional content.\n\nRespond with ONLY a JSON object in this exact format:\n{\n  "name": "Short meal name",\n  "foods": [{"item": "Food name", "portion": "Estimated portion"}],\n  "calories": <number>,\n  "protein": <number in grams>,\n  "carbs": <number in grams>,\n  "fat": <number in grams>\n}\nRound all numbers to integers. Use metric units.' },
+        { inline_data: { mime_type: 'image/jpeg', data: body.image } }
+      ]
+    }]
+  };
+
+  var res = UrlFetchApp.fetch(url, {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  });
+
+  if (res.getResponseCode() !== 200) {
+    return { success: false, error: 'Gemini API error: ' + res.getContentText().substring(0, 200) };
+  }
+
+  var result = JSON.parse(res.getContentText());
+  var text = result.candidates[0].content.parts[0].text;
+  // Strip markdown fences if present
+  text = text.replace(/```json\s*/i, '').replace(/```\s*$/, '').trim();
+  var parsed = JSON.parse(text);
+
+  return { success: true, data: parsed };
 }
 
 function handleDeleteBodyLog(body) {

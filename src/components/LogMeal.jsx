@@ -1,13 +1,13 @@
 import { useState, useEffect, useMemo } from 'react'
 import { getIngredientsList } from '../data/ingredientCache'
-import { getSavedMeals, saveMeal, logMeal, getMealUsageCounts } from '../api/sheets'
+import { getSavedMeals, saveMeal, logMeal, getMealUsageCounts, analyzeFood } from '../api/sheets'
 
 function today() {
   return new Date().toISOString().slice(0, 10)
 }
 
 export default function LogMeal({ onNavigate }) {
-  const [view, setView] = useState('list') // 'list', 'create', or 'custom'
+  const [view, setView] = useState('list') // 'list', 'create', 'custom', or 'snap'
   const [savedMeals, setSavedMeals] = useState({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -77,6 +77,10 @@ export default function LogMeal({ onNavigate }) {
     return <CustomMealForm onBack={() => setView('list')} onNavigate={navigateAndReset} />
   }
 
+  if (view === 'snap') {
+    return <SnapMealForm onBack={() => setView('list')} onNavigate={navigateAndReset} />
+  }
+
   const mealEntries = Object.entries(savedMeals)
     .sort((a, b) => (usageCounts[b[0]] || 0) - (usageCounts[a[0]] || 0))
 
@@ -98,9 +102,15 @@ export default function LogMeal({ onNavigate }) {
       </button>
       <button
         onClick={() => setView('custom')}
-        className="w-full bg-gray-700 text-white py-3 rounded-lg font-semibold mb-4 min-h-[48px] active:bg-gray-600"
+        className="w-full bg-gray-700 text-white py-3 rounded-lg font-semibold mb-2 min-h-[48px] active:bg-gray-600"
       >
         Log Custom Meal
+      </button>
+      <button
+        onClick={() => setView('snap')}
+        className="w-full bg-amber-600 text-white py-3 rounded-lg font-semibold mb-4 min-h-[48px] active:bg-amber-700"
+      >
+        Snap Meal
       </button>
 
       {loading && <p className="text-gray-400">Loading saved meals...</p>}
@@ -469,6 +479,181 @@ function CustomMealForm({ onBack, onNavigate }) {
       </button>
 
       {error && <p className="text-red-400 text-sm mt-2">Error: {error}</p>}
+    </div>
+  )
+}
+
+function compressImage(file) {
+  return new Promise((resolve) => {
+    const img = new Image()
+    const url = URL.createObjectURL(file)
+    img.onload = () => {
+      URL.revokeObjectURL(url)
+      const max = 1024
+      let w = img.width, h = img.height
+      if (w > max || h > max) {
+        if (w > h) { h = Math.round(h * max / w); w = max }
+        else { w = Math.round(w * max / h); h = max }
+      }
+      const canvas = document.createElement('canvas')
+      canvas.width = w
+      canvas.height = h
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h)
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.8)
+      resolve(dataUrl.split(',')[1])
+    }
+    img.src = url
+  })
+}
+
+function SnapMealForm({ onBack, onNavigate }) {
+  const [step, setStep] = useState('capture') // 'capture', 'analyzing', 'result', 'error'
+  const [preview, setPreview] = useState(null)
+  const [errorMsg, setErrorMsg] = useState('')
+  const [foods, setFoods] = useState([])
+  const [name, setName] = useState('')
+  const [calories, setCalories] = useState('')
+  const [protein, setProtein] = useState('')
+  const [carbs, setCarbs] = useState('')
+  const [fat, setFat] = useState('')
+
+  async function handleCapture(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setPreview(URL.createObjectURL(file))
+    setStep('analyzing')
+    try {
+      const base64 = await compressImage(file)
+      const data = await analyzeFood(base64)
+      setName(data.name || 'Photo meal')
+      setFoods(data.foods || [])
+      setCalories(String(data.calories || 0))
+      setProtein(String(data.protein || 0))
+      setCarbs(String(data.carbs || 0))
+      setFat(String(data.fat || 0))
+      setStep('result')
+    } catch (err) {
+      setErrorMsg(err.message || 'Failed to analyze photo')
+      setStep('error')
+    }
+  }
+
+  function handleRetake() {
+    setStep('capture')
+    setPreview(null)
+    setErrorMsg('')
+    setFoods([])
+  }
+
+  function handleLog() {
+    if (!name.trim() || !calories) return
+    const mealId = 'snap_' + Date.now()
+    const date = today()
+    const rows = [{
+      Date: date,
+      Meal_ID: mealId,
+      Meal_Name: name.trim(),
+      Ingredient: 'Photo estimate',
+      Qty_g: 0,
+      Calories: parseFloat(calories) || 0,
+      Protein: parseFloat(protein) || 0,
+      Carbs: parseFloat(carbs) || 0,
+      Fat: parseFloat(fat) || 0,
+      Fiber: 0,
+    }]
+    onNavigate('dashboard')
+    logMeal(rows).catch(() => {})
+  }
+
+  return (
+    <div className="p-4">
+      <div className="flex items-center gap-3 mb-4">
+        <button onClick={onBack} className="text-blue-400 min-w-[48px] min-h-[48px] flex items-center justify-center">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6">
+            <polyline points="15 18 9 12 15 6"/>
+          </svg>
+        </button>
+        <h1 className="text-2xl font-bold">Snap Meal</h1>
+      </div>
+
+      {step === 'capture' && (
+        <label className="block w-full bg-amber-600 text-white text-center py-8 rounded-lg font-semibold text-lg cursor-pointer active:bg-amber-700">
+          Take Photo
+          <input type="file" accept="image/*" capture="environment" onChange={handleCapture} className="hidden" />
+        </label>
+      )}
+
+      {step === 'analyzing' && (
+        <div className="text-center">
+          {preview && <img src={preview} alt="Food" className="w-48 h-48 object-cover rounded-lg mx-auto mb-4" />}
+          <p className="text-gray-400 animate-pulse text-lg">Analyzing your food...</p>
+        </div>
+      )}
+
+      {step === 'error' && (
+        <div className="text-center">
+          {preview && <img src={preview} alt="Food" className="w-48 h-48 object-cover rounded-lg mx-auto mb-4" />}
+          <p className="text-red-400 mb-4">{errorMsg}</p>
+          <button onClick={handleRetake} className="w-full bg-gray-700 text-white py-3 rounded-lg font-semibold min-h-[48px]">
+            Try Again
+          </button>
+        </div>
+      )}
+
+      {step === 'result' && (
+        <div>
+          {preview && <img src={preview} alt="Food" className="w-32 h-32 object-cover rounded-lg mx-auto mb-4" />}
+
+          {foods.length > 0 && (
+            <div className="bg-gray-800 rounded-lg p-3 mb-4 text-sm text-gray-300">
+              {foods.map((f, i) => (
+                <p key={i}>{f.item} — {f.portion}</p>
+              ))}
+            </div>
+          )}
+
+          <div className="space-y-3">
+            <div>
+              <label className="text-sm text-gray-400">Meal Name</label>
+              <input type="text" value={name} onChange={e => setName(e.target.value)}
+                className="w-full bg-gray-800 rounded-lg p-3 mt-1 text-white" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-sm text-gray-400">Calories</label>
+                <input type="number" inputMode="numeric" value={calories} onChange={e => setCalories(e.target.value)}
+                  className="w-full bg-gray-800 rounded-lg p-3 mt-1 text-white" />
+              </div>
+              <div>
+                <label className="text-sm text-gray-400">Protein (g)</label>
+                <input type="number" inputMode="decimal" value={protein} onChange={e => setProtein(e.target.value)}
+                  className="w-full bg-gray-800 rounded-lg p-3 mt-1 text-white" />
+              </div>
+              <div>
+                <label className="text-sm text-gray-400">Carbs (g)</label>
+                <input type="number" inputMode="decimal" value={carbs} onChange={e => setCarbs(e.target.value)}
+                  className="w-full bg-gray-800 rounded-lg p-3 mt-1 text-white" />
+              </div>
+              <div>
+                <label className="text-sm text-gray-400">Fat (g)</label>
+                <input type="number" inputMode="decimal" value={fat} onChange={e => setFat(e.target.value)}
+                  className="w-full bg-gray-800 rounded-lg p-3 mt-1 text-white" />
+              </div>
+            </div>
+          </div>
+
+          <button
+            onClick={handleLog}
+            disabled={!name.trim() || !calories}
+            className="w-full mt-6 bg-green-600 text-white py-3 rounded-lg font-semibold min-h-[48px] active:bg-green-700 disabled:opacity-50"
+          >
+            Log to Today
+          </button>
+          <button onClick={handleRetake} className="w-full mt-2 bg-gray-700 text-white py-3 rounded-lg font-semibold min-h-[48px]">
+            Retake
+          </button>
+        </div>
+      )}
     </div>
   )
 }
