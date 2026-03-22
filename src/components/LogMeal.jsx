@@ -510,12 +510,8 @@ function SnapMealForm({ onBack, onNavigate }) {
   const [step, setStep] = useState('capture') // 'capture', 'analyzing', 'result', 'error'
   const [preview, setPreview] = useState(null)
   const [errorMsg, setErrorMsg] = useState('')
-  const [foods, setFoods] = useState([])
   const [name, setName] = useState('')
-  const [calories, setCalories] = useState('')
-  const [protein, setProtein] = useState('')
-  const [carbs, setCarbs] = useState('')
-  const [fat, setFat] = useState('')
+  const [items, setItems] = useState([])
 
   async function handleCapture(e) {
     const file = e.target.files?.[0]
@@ -526,11 +522,15 @@ function SnapMealForm({ onBack, onNavigate }) {
       const base64 = await compressImage(file)
       const data = await analyzeFood(base64)
       setName(data.name || 'Photo meal')
-      setFoods(data.foods || [])
-      setCalories(String(data.calories || 0))
-      setProtein(String(data.protein || 0))
-      setCarbs(String(data.carbs || 0))
-      setFat(String(data.fat || 0))
+      setItems((data.foods || []).map(f => ({
+        item: f.item,
+        grams: f.grams || 100,
+        gramsStr: String(f.grams || 100),
+        cal100: f.calories_100g || 0,
+        pro100: f.protein_100g || 0,
+        carb100: f.carbs_100g || 0,
+        fat100: f.fat_100g || 0,
+      })))
       setStep('result')
     } catch (err) {
       setErrorMsg(err.message || 'Failed to analyze photo')
@@ -538,29 +538,49 @@ function SnapMealForm({ onBack, onNavigate }) {
     }
   }
 
+  function updateGrams(index, val) {
+    setItems(prev => prev.map((item, i) => {
+      if (i !== index) return item
+      return { ...item, gramsStr: val, grams: parseFloat(val) || 0 }
+    }))
+  }
+
   function handleRetake() {
     setStep('capture')
     setPreview(null)
     setErrorMsg('')
-    setFoods([])
+    setItems([])
   }
 
+  const totals = items.reduce((acc, f) => {
+    const g = f.grams / 100
+    return {
+      calories: acc.calories + f.cal100 * g,
+      protein: acc.protein + f.pro100 * g,
+      carbs: acc.carbs + f.carb100 * g,
+      fat: acc.fat + f.fat100 * g,
+    }
+  }, { calories: 0, protein: 0, carbs: 0, fat: 0 })
+
   function handleLog() {
-    if (!name.trim() || !calories) return
+    if (!name.trim() || items.length === 0) return
     const mealId = 'snap_' + Date.now()
     const date = today()
-    const rows = [{
-      Date: date,
-      Meal_ID: mealId,
-      Meal_Name: name.trim(),
-      Ingredient: 'Photo estimate',
-      Qty_g: 0,
-      Calories: parseFloat(calories) || 0,
-      Protein: parseFloat(protein) || 0,
-      Carbs: parseFloat(carbs) || 0,
-      Fat: parseFloat(fat) || 0,
-      Fiber: 0,
-    }]
+    const rows = items.map(f => {
+      const g = f.grams / 100
+      return {
+        Date: date,
+        Meal_ID: mealId,
+        Meal_Name: name.trim(),
+        Ingredient: f.item,
+        Qty_g: Math.round(f.grams),
+        Calories: Math.round(f.cal100 * g),
+        Protein: Math.round(f.pro100 * g),
+        Carbs: Math.round(f.carb100 * g),
+        Fat: Math.round(f.fat100 * g),
+        Fiber: 0,
+      }
+    })
     onNavigate('dashboard')
     logMeal(rows).catch(() => {})
   }
@@ -604,48 +624,61 @@ function SnapMealForm({ onBack, onNavigate }) {
         <div>
           {preview && <img src={preview} alt="Food" className="w-32 h-32 object-cover rounded-lg mx-auto mb-4" />}
 
-          {foods.length > 0 && (
-            <div className="bg-gray-800 rounded-lg p-3 mb-4 text-sm text-gray-300">
-              {foods.map((f, i) => (
-                <p key={i}>{f.item} — {f.portion}</p>
-              ))}
-            </div>
-          )}
+          <div>
+            <label className="text-sm text-gray-400">Meal Name</label>
+            <input type="text" value={name} onChange={e => setName(e.target.value)}
+              className="w-full bg-gray-800 rounded-lg p-3 mt-1 mb-3 text-white" />
+          </div>
 
-          <div className="space-y-3">
+          <div className="bg-gray-800 rounded-lg p-3 mb-3 grid grid-cols-4 text-center">
             <div>
-              <label className="text-sm text-gray-400">Meal Name</label>
-              <input type="text" value={name} onChange={e => setName(e.target.value)}
-                className="w-full bg-gray-800 rounded-lg p-3 mt-1 text-white" />
+              <p className="text-lg font-bold">{Math.round(totals.calories)}</p>
+              <p className="text-xs text-gray-400">Cal</p>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-sm text-gray-400">Calories</label>
-                <input type="number" inputMode="numeric" value={calories} onChange={e => setCalories(e.target.value)}
-                  className="w-full bg-gray-800 rounded-lg p-3 mt-1 text-white" />
-              </div>
-              <div>
-                <label className="text-sm text-gray-400">Protein (g)</label>
-                <input type="number" inputMode="decimal" value={protein} onChange={e => setProtein(e.target.value)}
-                  className="w-full bg-gray-800 rounded-lg p-3 mt-1 text-white" />
-              </div>
-              <div>
-                <label className="text-sm text-gray-400">Carbs (g)</label>
-                <input type="number" inputMode="decimal" value={carbs} onChange={e => setCarbs(e.target.value)}
-                  className="w-full bg-gray-800 rounded-lg p-3 mt-1 text-white" />
-              </div>
-              <div>
-                <label className="text-sm text-gray-400">Fat (g)</label>
-                <input type="number" inputMode="decimal" value={fat} onChange={e => setFat(e.target.value)}
-                  className="w-full bg-gray-800 rounded-lg p-3 mt-1 text-white" />
-              </div>
+            <div>
+              <p className="text-lg font-bold text-blue-400">{Math.round(totals.protein)}g</p>
+              <p className="text-xs text-gray-400">Protein</p>
             </div>
+            <div>
+              <p className="text-lg font-bold text-yellow-400">{Math.round(totals.carbs)}g</p>
+              <p className="text-xs text-gray-400">Carbs</p>
+            </div>
+            <div>
+              <p className="text-lg font-bold text-red-400">{Math.round(totals.fat)}g</p>
+              <p className="text-xs text-gray-400">Fat</p>
+            </div>
+          </div>
+
+          <div className="space-y-2 mb-4">
+            {items.map((f, i) => {
+              const g = f.grams / 100
+              return (
+                <div key={i} className="bg-gray-800 rounded-lg p-3">
+                  <div className="flex justify-between items-center">
+                    <p className="font-medium">{f.item}</p>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        inputMode="numeric"
+                        value={f.gramsStr}
+                        onChange={e => updateGrams(i, e.target.value)}
+                        className="w-20 bg-gray-700 rounded p-2 text-right text-white"
+                      />
+                      <span className="text-gray-400 text-sm">g</span>
+                    </div>
+                  </div>
+                  <p className="text-sm text-gray-400 mt-1">
+                    {Math.round(f.cal100 * g)} cal &middot; {Math.round(f.pro100 * g)}g P &middot; {Math.round(f.carb100 * g)}g C &middot; {Math.round(f.fat100 * g)}g F
+                  </p>
+                </div>
+              )
+            })}
           </div>
 
           <button
             onClick={handleLog}
-            disabled={!name.trim() || !calories}
-            className="w-full mt-6 bg-green-600 text-white py-3 rounded-lg font-semibold min-h-[48px] active:bg-green-700 disabled:opacity-50"
+            disabled={!name.trim() || items.length === 0}
+            className="w-full bg-green-600 text-white py-3 rounded-lg font-semibold min-h-[48px] active:bg-green-700 disabled:opacity-50"
           >
             Log to Today
           </button>

@@ -1,5 +1,5 @@
 var SPREADSHEET_ID = SpreadsheetApp.getActiveSpreadsheet().getId();
-var API_KEY = 'cacaolat'; // Set this to your password
+var API_KEY = ''; // Set this to your password
 var GEMINI_API_KEY = 'your-gemini-api-key-here';
 
 function doPost(e) {
@@ -395,7 +395,7 @@ function handleAnalyzeFood(body) {
   var payload = {
     contents: [{
       parts: [
-        { text: 'You are a nutrition estimation assistant. Analyze this photo of food and estimate the nutritional content.\n\nRespond with ONLY a JSON object in this exact format:\n{\n  "name": "Short meal name",\n  "foods": [{"item": "Food name", "portion": "Estimated portion"}],\n  "calories": <number>,\n  "protein": <number in grams>,\n  "carbs": <number in grams>,\n  "fat": <number in grams>\n}\nRound all numbers to integers. Use metric units.' },
+        { text: 'You are a nutrition estimation assistant. Analyze this photo of food and estimate the nutritional content.\n\nRespond with ONLY a JSON object in this exact format:\n{\n  "name": "Short meal name",\n  "foods": [\n    {\n      "item": "Food name",\n      "grams": <estimated total grams>,\n      "calories_100g": <calories per 100g>,\n      "protein_100g": <protein grams per 100g>,\n      "carbs_100g": <carbs grams per 100g>,\n      "fat_100g": <fat grams per 100g>\n    }\n  ]\n}\nList each distinct food item separately. Round all numbers to integers. Use metric units.' },
         { inline_data: { mime_type: 'image/jpeg', data: body.image } }
       ]
     }]
