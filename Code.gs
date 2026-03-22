@@ -1,8 +1,12 @@
 var SPREADSHEET_ID = SpreadsheetApp.getActiveSpreadsheet().getId();
+var API_KEY = 'cacaolat'; // Set this to your password
 
 function doPost(e) {
   try {
     var body = JSON.parse(e.postData.contents);
+    if (body.key !== API_KEY) {
+      return respond({ success: false, error: 'Unauthorized' });
+    }
     switch (body.action) {
       case 'getIngredients':       return respond(handleGetIngredients());
       case 'getSavedMeals':        return respond(handleGetSavedMeals());

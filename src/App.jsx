@@ -37,7 +37,48 @@ const tabs = [
   )},
 ]
 
+const APP_PASSWORD = import.meta.env.VITE_APP_PASSWORD
+
+function LockScreen({ onUnlock }) {
+  const [pw, setPw] = useState('')
+  const [error, setError] = useState(false)
+
+  function handleSubmit(e) {
+    e.preventDefault()
+    if (pw === APP_PASSWORD) {
+      localStorage.setItem('fittrack_pw', pw)
+      onUnlock()
+    } else {
+      setError(true)
+    }
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center p-4">
+      <form onSubmit={handleSubmit} className="w-full max-w-sm">
+        <h1 className="text-2xl font-bold text-center mb-6">FitTrack</h1>
+        <input
+          type="password"
+          placeholder="Password"
+          value={pw}
+          onChange={e => { setPw(e.target.value); setError(false) }}
+          autoFocus
+          className="w-full bg-gray-800 rounded-lg p-4 text-white placeholder-gray-500 text-lg"
+        />
+        <button
+          type="submit"
+          className="w-full mt-4 bg-blue-600 text-white py-3 rounded-lg font-semibold min-h-[48px] active:bg-blue-700"
+        >
+          Enter
+        </button>
+        {error && <p className="text-red-400 text-center mt-3">Wrong password</p>}
+      </form>
+    </div>
+  )
+}
+
 export default function App() {
+  const [unlocked, setUnlocked] = useState(() => localStorage.getItem('fittrack_pw') === APP_PASSWORD)
   const [active, setActive] = useState('dashboard')
   const [offline, setOffline] = useState(!navigator.onLine)
   const [refreshKey, setRefreshKey] = useState(0)
@@ -54,6 +95,8 @@ export default function App() {
     window.addEventListener('offline', off)
     return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off) }
   }, [])
+
+  if (!unlocked) return <LockScreen onUnlock={() => setUnlocked(true)} />
 
   return (
     <div className="min-h-screen bg-gray-950 text-white pb-20">

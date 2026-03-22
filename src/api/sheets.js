@@ -4,7 +4,7 @@ async function callApi(action, params = {}) {
   const res = await fetch(API_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ action, ...params }),
+    body: JSON.stringify({ action, key: localStorage.getItem('fittrack_pw') || '', ...params }),
   })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   const json = await res.json()

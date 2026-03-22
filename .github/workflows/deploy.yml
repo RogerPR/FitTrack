@@ -28,6 +28,8 @@ jobs:
       - run: npm ci
       - run: echo "export const API_URL = '${{ secrets.VITE_API_URL }}';" > src/config.js
       - run: npm run build
+        env:
+          VITE_APP_PASSWORD: ${{ secrets.VITE_APP_PASSWORD }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
