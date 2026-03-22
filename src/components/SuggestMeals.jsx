@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react'
-import ingredientsData from '../data/ingredients.json'
+import { useState, useEffect, useMemo } from 'react'
+import { getIngredientsList } from '../data/ingredientCache'
 import mealTemplates from '../data/mealTemplates.json'
 import { logMeal } from '../api/sheets'
 
@@ -7,12 +7,7 @@ function today() {
   return new Date().toISOString().slice(0, 10)
 }
 
-const ingMap = {}
-for (const ing of ingredientsData) {
-  ingMap[ing.Name] = ing
-}
-
-function computeMacros(template) {
+function computeMacros(template, ingMap) {
   let calories = 0, protein = 0, carbs = 0, fat = 0, fiber = 0
   for (const item of template.ingredients) {
     const ing = ingMap[item.name]
@@ -35,7 +30,7 @@ const CATEGORY_COLORS = {
   snack: 'text-green-400',
 }
 
-function suggestMeals(goals, todayTotals) {
+function suggestMeals(goals, todayTotals, ingMap) {
   const remaining = {
     calories: Math.max(0, (goals.Calories || 0) - todayTotals.calories),
     protein: Math.max(0, (goals.Protein || 0) - todayTotals.protein),
@@ -43,7 +38,7 @@ function suggestMeals(goals, todayTotals) {
     fat: Math.max(0, (goals.Fat || 0) - todayTotals.fat),
   }
 
-  const templatesWithMacros = mealTemplates.map(t => ({ ...t, macros: computeMacros(t) }))
+  const templatesWithMacros = mealTemplates.map(t => ({ ...t, macros: computeMacros(t, ingMap) }))
   const byCategory = {}
   for (const t of templatesWithMacros) {
     if (!byCategory[t.category]) byCategory[t.category] = []
@@ -97,8 +92,21 @@ function suggestMeals(goals, todayTotals) {
 }
 
 export default function SuggestMeals({ goals, todayTotals, onClose }) {
-  const suggestions = useMemo(() => suggestMeals(goals, todayTotals), [goals, todayTotals])
-  const [status, setStatus] = useState({}) // id -> 'logged' | 'skipped'
+  const [ingredients, setIngredients] = useState([])
+  useEffect(() => { getIngredientsList().then(setIngredients) }, [])
+
+  const ingMap = useMemo(() => {
+    const m = {}
+    for (const ing of ingredients) m[ing.Name] = ing
+    return m
+  }, [ingredients])
+
+  const suggestions = useMemo(() => {
+    if (ingredients.length === 0) return []
+    return suggestMeals(goals, todayTotals, ingMap)
+  }, [goals, todayTotals, ingMap, ingredients])
+
+  const [status, setStatus] = useState({})
   const [toast, setToast] = useState(null)
 
   function showToast(msg) {

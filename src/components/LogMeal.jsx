@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
-import ingredientsData from '../data/ingredients.json'
-import { getSavedMeals, saveMeal, logMeal } from '../api/sheets'
+import { getIngredientsList } from '../data/ingredientCache'
+import { getSavedMeals, saveMeal, logMeal, getMealUsageCounts } from '../api/sheets'
 
 function today() {
   return new Date().toISOString().slice(0, 10)
@@ -13,12 +13,17 @@ export default function LogMeal({ onNavigate }) {
   const [error, setError] = useState(null)
   const [expandedMeal, setExpandedMeal] = useState(null)
   const [toast, setToast] = useState(null)
+  const [usageCounts, setUsageCounts] = useState({})
+  const [editingMeal, setEditingMeal] = useState(null)
 
   function loadSavedMeals() {
     setLoading(true)
     setError(null)
-    getSavedMeals()
-      .then(data => setSavedMeals(data || {}))
+    Promise.all([getSavedMeals(), getMealUsageCounts().catch(() => ({}))])
+      .then(([data, counts]) => {
+        setSavedMeals(data || {})
+        setUsageCounts(counts || {})
+      })
       .catch(err => setError(err.message))
       .finally(() => setLoading(false))
   }
@@ -73,6 +78,7 @@ export default function LogMeal({ onNavigate }) {
   }
 
   const mealEntries = Object.entries(savedMeals)
+    .sort((a, b) => (usageCounts[b[0]] || 0) - (usageCounts[a[0]] || 0))
 
   return (
     <div className="p-4">
@@ -141,7 +147,7 @@ export default function LogMeal({ onNavigate }) {
                     </div>
                   ))}
                   <button
-                    onClick={() => handleLogToday(mealId, rows)}
+                    onClick={() => setEditingMeal({ mealId, rows: rows.map(r => ({ ...r })) })}
                     className="w-full mt-3 bg-green-600 text-white py-3 rounded-lg font-semibold min-h-[48px] active:bg-green-700"
                   >
                     Log to Today
@@ -153,6 +159,15 @@ export default function LogMeal({ onNavigate }) {
         })}
       </div>
 
+      {editingMeal && (
+        <EditQuantitiesModal
+          mealId={editingMeal.mealId}
+          rows={editingMeal.rows}
+          onLog={(mealId, rows) => { setEditingMeal(null); handleLogToday(mealId, rows) }}
+          onCancel={() => setEditingMeal(null)}
+        />
+      )}
+
       {toast && (
         <div className="fixed bottom-24 left-4 right-4 bg-green-600 text-white text-center py-3 rounded-lg font-semibold">
           {toast}
@@ -162,16 +177,112 @@ export default function LogMeal({ onNavigate }) {
   )
 }
 
+function EditQuantitiesModal({ mealId, rows, onLog, onCancel }) {
+  const [editRows, setEditRows] = useState(() =>
+    rows.map(r => {
+      const rate100 = r.Qty_g > 0 ? 100 / r.Qty_g : 0
+      return {
+        ...r,
+        cal100: r.Calories * rate100,
+        pro100: r.Protein * rate100,
+        carb100: r.Carbs * rate100,
+        fat100: r.Fat * rate100,
+        fiber100: (r.Fiber || 0) * rate100,
+        qtyStr: String(r.Qty_g),
+      }
+    })
+  )
+
+  function updateQty(index, val) {
+    setEditRows(prev => prev.map((r, i) => {
+      if (i !== index) return r
+      const qty = parseFloat(val) || 0
+      const f = qty / 100
+      return {
+        ...r,
+        qtyStr: val,
+        Qty_g: qty,
+        Calories: +(r.cal100 * f).toFixed(1),
+        Protein: +(r.pro100 * f).toFixed(1),
+        Carbs: +(r.carb100 * f).toFixed(1),
+        Fat: +(r.fat100 * f).toFixed(1),
+        Fiber: +(r.fiber100 * f).toFixed(1),
+      }
+    }))
+  }
+
+  const totals = editRows.reduce((acc, r) => ({
+    calories: acc.calories + (r.Calories || 0),
+    protein: acc.protein + (r.Protein || 0),
+    carbs: acc.carbs + (r.Carbs || 0),
+    fat: acc.fat + (r.Fat || 0),
+  }), { calories: 0, protein: 0, carbs: 0, fat: 0 })
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-end justify-center z-50">
+      <div className="bg-gray-900 rounded-t-2xl w-full max-w-lg max-h-[85vh] flex flex-col">
+        <div className="p-4 border-b border-gray-800">
+          <p className="font-bold text-lg">{editRows[0]?.Meal_Name}</p>
+          <p className="text-sm text-gray-400 mt-1">
+            {Math.round(totals.calories)} cal &middot; {Math.round(totals.protein)}g P &middot; {Math.round(totals.carbs)}g C &middot; {Math.round(totals.fat)}g F
+          </p>
+        </div>
+
+        <div className="overflow-y-auto flex-1 p-4 space-y-3">
+          {editRows.map((r, i) => (
+            <div key={i} className="bg-gray-800 rounded-lg p-3">
+              <div className="flex justify-between items-center">
+                <p className="font-medium">{r.Ingredient}</p>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    value={r.qtyStr}
+                    onChange={e => updateQty(i, e.target.value)}
+                    className="w-20 bg-gray-700 rounded p-2 text-right text-white"
+                  />
+                  <span className="text-gray-400 text-sm">g</span>
+                </div>
+              </div>
+              <p className="text-sm text-gray-400 mt-1">
+                {Math.round(r.Calories)} cal &middot; {Math.round(r.Protein)}g P &middot; {Math.round(r.Carbs)}g C &middot; {Math.round(r.Fat)}g F
+              </p>
+            </div>
+          ))}
+        </div>
+
+        <div className="p-4 border-t border-gray-800 flex gap-3">
+          <button
+            onClick={onCancel}
+            className="flex-1 py-3 rounded-lg bg-gray-700 text-gray-300 font-semibold min-h-[48px]"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => onLog(mealId, editRows)}
+            className="flex-1 py-3 rounded-lg bg-green-600 text-white font-semibold min-h-[48px] active:bg-green-700"
+          >
+            Log
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function LogIngredientForm({ onBack, onNavigate }) {
   const [search, setSearch] = useState('')
   const [qtyInput, setQtyInput] = useState(null)
   const [qtyValue, setQtyValue] = useState('100')
+  const [ingredients, setIngredients] = useState([])
+
+  useEffect(() => { getIngredientsList().then(setIngredients) }, [])
 
   const filtered = useMemo(() => {
-    if (!search.trim()) return ingredientsData
+    if (!search.trim()) return ingredients
     const q = search.toLowerCase()
-    return ingredientsData.filter(i => i.Name.toLowerCase().includes(q))
-  }, [search])
+    return ingredients.filter(i => i.Name.toLowerCase().includes(q))
+  }, [search, ingredients])
 
   function handleConfirm() {
     const qty = parseInt(qtyValue) || 0
@@ -364,18 +475,21 @@ function CustomMealForm({ onBack, onNavigate }) {
 
 function CreateMeal({ onBack, onSaved }) {
   const [search, setSearch] = useState('')
-  const [added, setAdded] = useState([]) // { ingredient, qty, macros }
-  const [qtyInput, setQtyInput] = useState(null) // ingredient being added
+  const [added, setAdded] = useState([])
+  const [qtyInput, setQtyInput] = useState(null)
   const [qtyValue, setQtyValue] = useState('100')
   const [mealName, setMealName] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
+  const [ingredients, setIngredients] = useState([])
+
+  useEffect(() => { getIngredientsList().then(setIngredients) }, [])
 
   const filtered = useMemo(() => {
-    if (!search.trim()) return ingredientsData
+    if (!search.trim()) return ingredients
     const q = search.toLowerCase()
-    return ingredientsData.filter(i => i.Name.toLowerCase().includes(q))
-  }, [search])
+    return ingredients.filter(i => i.Name.toLowerCase().includes(q))
+  }, [search, ingredients])
 
   function calcMacros(ingredient, qty) {
     const factor = qty / 100

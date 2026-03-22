@@ -21,6 +21,7 @@ function doPost(e) {
       case 'getBodyLog':           return respond(handleGetBodyLog());
       case 'logBody':              return respond(handleLogBody(body));
       case 'deleteBodyLog':        return respond(handleDeleteBodyLog(body));
+      case 'getMealUsageCounts':   return respond(handleGetMealUsageCounts());
       default: return respond({ success: false, error: 'Unknown action: ' + body.action });
     }
   } catch (err) {
@@ -364,6 +365,21 @@ function handleGetBodyLog() {
 function handleLogBody(body) {
   appendRows('Body Log', [body.entry]);
   return { success: true, data: null };
+}
+
+function handleGetMealUsageCounts() {
+  var rows = getSheetData('Daily Meals');
+  var seen = {};
+  var counts = {};
+  for (var i = 0; i < rows.length; i++) {
+    var key = normalizeDate(rows[i].Date) + '|' + rows[i].Meal_ID;
+    if (!seen[key]) {
+      seen[key] = true;
+      var mid = String(rows[i].Meal_ID);
+      counts[mid] = (counts[mid] || 0) + 1;
+    }
+  }
+  return { success: true, data: counts };
 }
 
 function handleDeleteBodyLog(body) {
