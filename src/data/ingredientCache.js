@@ -11,3 +11,5 @@ export function getIngredientsList() {
   }
   return cached
 }
+
+export function invalidateIngredientCache() { cached = null }

@@ -28,6 +28,8 @@ function doPost(e) {
       case 'deleteBodyLog':        return respond(handleDeleteBodyLog(body));
       case 'getMealUsageCounts':   return respond(handleGetMealUsageCounts());
       case 'analyzeFood':          return respond(handleAnalyzeFood(body));
+      case 'describeMeal':         return respond(handleDescribeMeal(body));
+      case 'addIngredient':        return respond(handleAddIngredient(body));
       default: return respond({ success: false, error: 'Unknown action: ' + body.action });
     }
   } catch (err) {
@@ -419,6 +421,43 @@ function handleAnalyzeFood(body) {
   var parsed = JSON.parse(text);
 
   return { success: true, data: parsed };
+}
+
+function handleDescribeMeal(body) {
+  if (!body.text) return { success: false, error: 'No text provided' };
+
+  var url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + GEMINI_API_KEY;
+  var payload = {
+    contents: [{
+      parts: [
+        { text: 'You are a nutrition estimation assistant. Estimate the nutritional content of the following meal description.\n\nIf the user specifies quantities, use those. If not, estimate reasonable portions.\n\nRespond with ONLY a JSON object in this exact format:\n{\n  "name": "Short meal name",\n  "foods": [\n    {\n      "item": "Food name",\n      "grams": <estimated total grams>,\n      "calories_100g": <calories per 100g>,\n      "protein_100g": <protein grams per 100g>,\n      "carbs_100g": <carbs grams per 100g>,\n      "fat_100g": <fat grams per 100g>\n    }\n  ]\n}\nList each distinct food item separately. Round all numbers to integers. Use metric units.\n\nMeal description: ' + body.text }
+      ]
+    }]
+  };
+
+  var res = UrlFetchApp.fetch(url, {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  });
+
+  if (res.getResponseCode() !== 200) {
+    return { success: false, error: 'Gemini API error: ' + res.getContentText().substring(0, 200) };
+  }
+
+  var result = JSON.parse(res.getContentText());
+  var text = result.candidates[0].content.parts[0].text;
+  text = text.replace(/```json\s*/i, '').replace(/```\s*$/, '').trim();
+  var parsed = JSON.parse(text);
+
+  return { success: true, data: parsed };
+}
+
+function handleAddIngredient(body) {
+  if (!body.ingredient || !body.ingredient.Name) return { success: false, error: 'No ingredient name provided' };
+  appendRows('Ingredients', [body.ingredient]);
+  return { success: true, data: null };
 }
 
 function handleDeleteBodyLog(body) {
