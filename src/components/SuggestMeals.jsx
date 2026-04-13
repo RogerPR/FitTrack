@@ -91,7 +91,7 @@ function suggestMeals(goals, todayTotals, ingMap) {
   return picks
 }
 
-export default function SuggestMeals({ goals, todayTotals, onClose }) {
+export default function SuggestMeals({ goals, todayTotals, onClose, date }) {
   const [ingredients, setIngredients] = useState([])
   useEffect(() => { getIngredientsList().then(setIngredients) }, [])
 
@@ -122,7 +122,6 @@ export default function SuggestMeals({ goals, todayTotals, onClose }) {
   }), { calories: 0, protein: 0, carbs: 0, fat: 0 })
 
   async function handleLog(template) {
-    const date = today()
     const mealId = 'suggest_' + Date.now()
     const rows = template.ingredients.map(item => {
       const ing = ingMap[item.name]

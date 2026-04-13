@@ -6,7 +6,7 @@ function today() {
   return new Date().toISOString().slice(0, 10)
 }
 
-export default function LogMeal({ onNavigate }) {
+export default function LogMeal({ onNavigate, date }) {
   const [view, setView] = useState('list') // 'list', 'create', 'custom', 'snap', or 'describe'
   const [savedMeals, setSavedMeals] = useState({})
   const [loading, setLoading] = useState(true)
@@ -42,7 +42,6 @@ export default function LogMeal({ onNavigate }) {
   }
 
   async function handleLogToday(mealId, rows) {
-    const date = today()
     const logRows = rows.map(r => ({
       Date: date,
       Meal_ID: r.Meal_ID,
@@ -70,19 +69,19 @@ export default function LogMeal({ onNavigate }) {
   }
 
   if (view === 'ingredient') {
-    return <LogIngredientForm onBack={() => setView('list')} onNavigate={navigateAndReset} />
+    return <LogIngredientForm onBack={() => setView('list')} onNavigate={navigateAndReset} date={date} />
   }
 
   if (view === 'custom') {
-    return <CustomMealForm onBack={() => setView('list')} onNavigate={navigateAndReset} />
+    return <CustomMealForm onBack={() => setView('list')} onNavigate={navigateAndReset} date={date} />
   }
 
   if (view === 'snap') {
-    return <SnapMealForm onBack={() => setView('list')} onNavigate={navigateAndReset} />
+    return <SnapMealForm onBack={() => setView('list')} onNavigate={navigateAndReset} date={date} />
   }
 
   if (view === 'describe') {
-    return <DescribeMealForm onBack={() => setView('list')} onNavigate={navigateAndReset} />
+    return <DescribeMealForm onBack={() => setView('list')} onNavigate={navigateAndReset} date={date} />
   }
 
   const mealEntries = Object.entries(savedMeals)
@@ -290,7 +289,7 @@ function EditQuantitiesModal({ mealId, rows, onLog, onCancel }) {
   )
 }
 
-function LogIngredientForm({ onBack, onNavigate }) {
+function LogIngredientForm({ onBack, onNavigate, date }) {
   const [search, setSearch] = useState('')
   const [qtyInput, setQtyInput] = useState(null)
   const [qtyValue, setQtyValue] = useState('100')
@@ -301,7 +300,16 @@ function LogIngredientForm({ onBack, onNavigate }) {
   const filtered = useMemo(() => {
     if (!search.trim()) return ingredients
     const q = search.toLowerCase()
-    return ingredients.filter(i => i.Name.toLowerCase().includes(q))
+    return ingredients
+      .filter(i => i.Name.toLowerCase().includes(q))
+      .sort((a, b) => {
+        const an = a.Name.toLowerCase(), bn = b.Name.toLowerCase()
+        const aExact = an === q, bExact = bn === q
+        if (aExact !== bExact) return aExact ? -1 : 1
+        const aStarts = an.startsWith(q), bStarts = bn.startsWith(q)
+        if (aStarts !== bStarts) return aStarts ? -1 : 1
+        return 0
+      })
   }, [search, ingredients])
 
   function handleConfirm() {
@@ -310,7 +318,6 @@ function LogIngredientForm({ onBack, onNavigate }) {
     const factor = qty / 100
     const ing = qtyInput
     const mealId = 'ing_' + Date.now()
-    const date = today()
     const rows = [{
       Date: date,
       Meal_ID: mealId,
@@ -398,7 +405,7 @@ function LogIngredientForm({ onBack, onNavigate }) {
   )
 }
 
-function CustomMealForm({ onBack, onNavigate }) {
+function CustomMealForm({ onBack, onNavigate, date }) {
   const [name, setName] = useState('')
   const [calories, setCalories] = useState('')
   const [protein, setProtein] = useState('')
@@ -417,7 +424,6 @@ function CustomMealForm({ onBack, onNavigate }) {
     setSaving(true)
     setError(null)
     const mealId = 'custom_' + Date.now()
-    const date = today()
     const rows = [{
       Date: date,
       Meal_ID: mealId,
@@ -559,7 +565,7 @@ function compressImage(file) {
   })
 }
 
-function DescribeMealForm({ onBack, onNavigate }) {
+function DescribeMealForm({ onBack, onNavigate, date }) {
   const [step, setStep] = useState('input') // 'input', 'analyzing', 'result', 'error'
   const [text, setText] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
@@ -614,7 +620,6 @@ function DescribeMealForm({ onBack, onNavigate }) {
   function handleLog() {
     if (!name.trim() || items.length === 0) return
     const mealId = 'desc_' + Date.now()
-    const date = today()
     const rows = items.map(f => {
       const g = f.grams / 100
       return {
@@ -751,7 +756,7 @@ function DescribeMealForm({ onBack, onNavigate }) {
   )
 }
 
-function SnapMealForm({ onBack, onNavigate }) {
+function SnapMealForm({ onBack, onNavigate, date }) {
   const [step, setStep] = useState('capture') // 'capture', 'analyzing', 'result', 'error'
   const [preview, setPreview] = useState(null)
   const [errorMsg, setErrorMsg] = useState('')
@@ -810,7 +815,6 @@ function SnapMealForm({ onBack, onNavigate }) {
   function handleLog() {
     if (!name.trim() || items.length === 0) return
     const mealId = 'snap_' + Date.now()
-    const date = today()
     const rows = items.map(f => {
       const g = f.grams / 100
       return {

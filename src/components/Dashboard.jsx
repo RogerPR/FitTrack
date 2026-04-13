@@ -11,8 +11,7 @@ function formatDate(dateStr) {
   return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
 }
 
-export default function Dashboard({ onNavigate, refreshKey }) {
-  const [date, setDate] = useState(today())
+export default function Dashboard({ onNavigate, refreshKey, date, onDateChange }) {
   const [meals, setMeals] = useState({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -83,6 +82,7 @@ export default function Dashboard({ onNavigate, refreshKey }) {
       <SuggestMeals
         goals={goals}
         todayTotals={totals}
+        date={date}
         onClose={() => { setShowSuggest(false); loadData(date) }}
       />
     )
@@ -111,7 +111,7 @@ export default function Dashboard({ onNavigate, refreshKey }) {
           <input
             type="date"
             value={date}
-            onChange={e => setDate(e.target.value)}
+            onChange={e => onDateChange(e.target.value)}
             className="bg-gray-800 text-white rounded-lg px-3 py-2 text-sm"
           />
         </div>

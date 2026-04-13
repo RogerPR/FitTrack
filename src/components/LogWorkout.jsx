@@ -6,7 +6,7 @@ function today() {
   return new Date().toISOString().slice(0, 10)
 }
 
-export default function LogWorkout() {
+export default function LogWorkout({ date }) {
   const [view, setView] = useState('list') // 'list', 'create', 'log'
   const [routines, setRoutines] = useState({})
   const [loading, setLoading] = useState(true)
@@ -54,6 +54,7 @@ export default function LogWorkout() {
     return (
       <LogWorkoutSession
         routine={activeRoutine}
+        date={date}
         onBack={() => { setView('list'); setActiveRoutine(null) }}
         onSaved={() => { showToast('Workout logged!'); setView('list'); setActiveRoutine(null) }}
       />
@@ -230,7 +231,7 @@ function CreateRoutine({ onBack, onSaved }) {
 
       {/* Save bar */}
       {selected.length > 0 && (
-        <div className="fixed bottom-16 left-0 right-0 bg-gray-900 border-t border-gray-800 p-4">
+        <div className="fixed bottom-20 left-0 right-0 bg-gray-900 border-t border-gray-800 p-4">
           <div className="flex gap-3">
             <input
               type="text"
@@ -256,7 +257,7 @@ function CreateRoutine({ onBack, onSaved }) {
 
 // --- Log Workout Session ---
 
-function LogWorkoutSession({ routine, onBack, onSaved }) {
+function LogWorkoutSession({ routine, date, onBack, onSaved }) {
   const [exercises, setExercises] = useState(
     routine.exercises.map(name => ({
       name,
@@ -340,7 +341,6 @@ function LogWorkoutSession({ routine, onBack, onSaved }) {
   async function handleSave() {
     setSaving(true)
     setError(null)
-    const date = today()
     const rows = []
     for (const ex of exercises) {
       for (let i = 0; i < ex.sets.length; i++) {
@@ -383,7 +383,7 @@ function LogWorkoutSession({ routine, onBack, onSaved }) {
   const currentExerciseNames = exercises.map(e => e.name)
 
   return (
-    <div className="p-4 pb-32">
+    <div className="p-4 pb-44">
       <div className="flex items-center gap-3 mb-4">
         <button onClick={onBack} className="text-purple-400 min-w-[48px] min-h-[48px] flex items-center justify-center">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6">
@@ -502,7 +502,7 @@ function LogWorkoutSession({ routine, onBack, onSaved }) {
       )}
 
       {/* Save bar */}
-      <div className="fixed bottom-16 left-0 right-0 bg-gray-900 border-t border-gray-800 p-4">
+      <div className="fixed bottom-20 left-0 right-0 bg-gray-900 border-t border-gray-800 p-4">
         <button
           onClick={handleSave}
           disabled={saving}

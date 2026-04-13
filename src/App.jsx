@@ -77,11 +77,16 @@ function LockScreen({ onUnlock }) {
   )
 }
 
+function today() {
+  return new Date().toISOString().slice(0, 10)
+}
+
 export default function App() {
   const [unlocked, setUnlocked] = useState(() => localStorage.getItem('fittrack_pw') === APP_PASSWORD)
   const [active, setActive] = useState('dashboard')
   const [offline, setOffline] = useState(!navigator.onLine)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [activeDate, setActiveDate] = useState(today())
 
   function navigateWithRefresh(tab) {
     setActive(tab)
@@ -105,9 +110,9 @@ export default function App() {
           No internet connection
         </div>
       )}
-      <div className={active === 'dashboard' ? '' : 'hidden'}><Dashboard onNavigate={setActive} refreshKey={refreshKey} /></div>
-      <div className={active === 'meal' ? '' : 'hidden'}><LogMeal onNavigate={navigateWithRefresh} /></div>
-      <div className={active === 'workout' ? '' : 'hidden'}><LogWorkout /></div>
+      <div className={active === 'dashboard' ? '' : 'hidden'}><Dashboard onNavigate={setActive} refreshKey={refreshKey} date={activeDate} onDateChange={setActiveDate} /></div>
+      <div className={active === 'meal' ? '' : 'hidden'}><LogMeal onNavigate={navigateWithRefresh} date={activeDate} /></div>
+      <div className={active === 'workout' ? '' : 'hidden'}><LogWorkout date={activeDate} /></div>
       <div className={active === 'more' ? '' : 'hidden'}><Settings /></div>
 
       <nav className="fixed bottom-0 left-0 right-0 bg-gray-900 border-t border-gray-800 flex justify-around">
