@@ -1,6 +1,7 @@
 var SPREADSHEET_ID = SpreadsheetApp.getActiveSpreadsheet().getId();
 var API_KEY = ''; // Set this to your password
 var GEMINI_API_KEY = 'your-gemini-api-key-here';
+var ANTHROPIC_API_KEY = 'your-anthropic-api-key-here';
 
 function doPost(e) {
   try {
@@ -29,6 +30,8 @@ function doPost(e) {
       case 'getMealUsageCounts':   return respond(handleGetMealUsageCounts());
       case 'analyzeFood':          return respond(handleAnalyzeFood(body));
       case 'describeMeal':         return respond(handleDescribeMeal(body));
+      case 'analyzeFoodPaid':      return respond(handleAnalyzeFoodPaid(body));
+      case 'describeMealPaid':     return respond(handleDescribeMealPaid(body));
       case 'addIngredient':        return respond(handleAddIngredient(body));
       default: return respond({ success: false, error: 'Unknown action: ' + body.action });
     }
@@ -448,6 +451,91 @@ function handleDescribeMeal(body) {
 
   var result = JSON.parse(res.getContentText());
   var text = result.candidates[0].content.parts[0].text;
+  text = text.replace(/```json\s*/i, '').replace(/```\s*$/, '').trim();
+  var parsed = JSON.parse(text);
+
+  return { success: true, data: parsed };
+}
+
+function handleAnalyzeFoodPaid(body) {
+  if (!body.image) return { success: false, error: 'No image provided' };
+
+  var url = 'https://api.anthropic.com/v1/messages';
+  var payload = {
+    model: 'claude-sonnet-4-6',
+    max_tokens: 1024,
+    messages: [{
+      role: 'user',
+      content: [
+        {
+          type: 'image',
+          source: {
+            type: 'base64',
+            media_type: 'image/jpeg',
+            data: body.image
+          }
+        },
+        {
+          type: 'text',
+          text: 'You are a nutrition estimation assistant. Analyze this photo of food and estimate the nutritional content.\n\nRespond with ONLY a JSON object in this exact format:\n{\n  "name": "Short meal name",\n  "foods": [\n    {\n      "item": "Food name",\n      "grams": <estimated total grams>,\n      "calories_100g": <calories per 100g>,\n      "protein_100g": <protein grams per 100g>,\n      "carbs_100g": <carbs grams per 100g>,\n      "fat_100g": <fat grams per 100g>\n    }\n  ]\n}\nList each distinct food item separately. Round all numbers to integers. Use metric units.'
+        }
+      ]
+    }]
+  };
+
+  var res = UrlFetchApp.fetch(url, {
+    method: 'post',
+    contentType: 'application/json',
+    headers: {
+      'x-api-key': ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01'
+    },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  });
+
+  if (res.getResponseCode() !== 200) {
+    return { success: false, error: 'Claude API error: ' + res.getContentText().substring(0, 200) };
+  }
+
+  var result = JSON.parse(res.getContentText());
+  var text = result.content[0].text;
+  text = text.replace(/```json\s*/i, '').replace(/```\s*$/, '').trim();
+  var parsed = JSON.parse(text);
+
+  return { success: true, data: parsed };
+}
+
+function handleDescribeMealPaid(body) {
+  if (!body.text) return { success: false, error: 'No text provided' };
+
+  var url = 'https://api.anthropic.com/v1/messages';
+  var payload = {
+    model: 'claude-sonnet-4-6',
+    max_tokens: 1024,
+    messages: [{
+      role: 'user',
+      content: 'You are a nutrition estimation assistant. Estimate the nutritional content of the following meal description.\n\nIf the user specifies quantities, use those. If not, estimate reasonable portions.\n\nRespond with ONLY a JSON object in this exact format:\n{\n  "name": "Short meal name",\n  "foods": [\n    {\n      "item": "Food name",\n      "grams": <estimated total grams>,\n      "calories_100g": <calories per 100g>,\n      "protein_100g": <protein grams per 100g>,\n      "carbs_100g": <carbs grams per 100g>,\n      "fat_100g": <fat grams per 100g>\n    }\n  ]\n}\nList each distinct food item separately. Round all numbers to integers. Use metric units.\n\nMeal description: ' + body.text
+    }]
+  };
+
+  var res = UrlFetchApp.fetch(url, {
+    method: 'post',
+    contentType: 'application/json',
+    headers: {
+      'x-api-key': ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01'
+    },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  });
+
+  if (res.getResponseCode() !== 200) {
+    return { success: false, error: 'Claude API error: ' + res.getContentText().substring(0, 200) };
+  }
+
+  var result = JSON.parse(res.getContentText());
+  var text = result.content[0].text;
   text = text.replace(/```json\s*/i, '').replace(/```\s*$/, '').trim();
   var parsed = JSON.parse(text);
 

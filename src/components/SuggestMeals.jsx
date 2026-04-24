@@ -23,6 +23,14 @@ function computeMacros(template, ingMap) {
 }
 
 const CATEGORIES = ['breakfast', 'lunch', 'dinner', 'snack']
+
+function getRemainingCategories() {
+  const hour = new Date().getHours()
+  if (hour < 10) return ['breakfast', 'lunch', 'dinner', 'snack']
+  if (hour < 14) return ['lunch', 'dinner', 'snack']
+  if (hour < 18) return ['dinner', 'snack']
+  return ['snack']
+}
 const CATEGORY_COLORS = {
   breakfast: 'text-yellow-400',
   lunch: 'text-blue-400',
@@ -30,7 +38,7 @@ const CATEGORY_COLORS = {
   snack: 'text-green-400',
 }
 
-function suggestMeals(goals, todayTotals, ingMap) {
+function suggestMeals(goals, todayTotals, ingMap, categories) {
   const remaining = {
     calories: Math.max(0, (goals.Calories || 0) - todayTotals.calories),
     protein: Math.max(0, (goals.Protein || 0) - todayTotals.protein),
@@ -47,9 +55,9 @@ function suggestMeals(goals, todayTotals, ingMap) {
 
   const picks = []
   let rem = { ...remaining }
-  let slotsLeft = CATEGORIES.length
+  let slotsLeft = categories.length
 
-  for (const cat of CATEGORIES) {
+  for (const cat of categories) {
     const candidates = byCategory[cat] || []
     if (candidates.length === 0) { slotsLeft--; continue }
 
@@ -101,10 +109,12 @@ export default function SuggestMeals({ goals, todayTotals, onClose, date }) {
     return m
   }, [ingredients])
 
+  const categories = useMemo(() => getRemainingCategories(), [])
+
   const suggestions = useMemo(() => {
     if (ingredients.length === 0) return []
-    return suggestMeals(goals, todayTotals, ingMap)
-  }, [goals, todayTotals, ingMap, ingredients])
+    return suggestMeals(goals, todayTotals, ingMap, categories)
+  }, [goals, todayTotals, ingMap, ingredients, categories])
 
   const [status, setStatus] = useState({})
   const [toast, setToast] = useState(null)
@@ -179,6 +189,9 @@ export default function SuggestMeals({ goals, todayTotals, onClose, date }) {
         </p>
         <p className="text-sm text-gray-400">
           {Math.round(suggestedTotal.protein)}g P &middot; {Math.round(suggestedTotal.carbs)}g C &middot; {Math.round(suggestedTotal.fat)}g F
+        </p>
+        <p className="text-xs text-gray-500 mt-1">
+          Suggesting: {categories.join(', ')}
         </p>
       </div>
 

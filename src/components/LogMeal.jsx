@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { getIngredientsList, invalidateIngredientCache } from '../data/ingredientCache'
-import { getSavedMeals, saveMeal, logMeal, getMealUsageCounts, analyzeFood, describeMeal, addIngredient } from '../api/sheets'
+import { getSavedMeals, saveMeal, logMeal, getMealUsageCounts, analyzeFood, describeMeal, analyzeFoodPaid, describeMealPaid, addIngredient } from '../api/sheets'
 
 function today() {
   return new Date().toISOString().slice(0, 10)
@@ -76,12 +76,12 @@ export default function LogMeal({ onNavigate, date }) {
     return <CustomMealForm onBack={() => setView('list')} onNavigate={navigateAndReset} date={date} />
   }
 
-  if (view === 'snap') {
-    return <SnapMealForm onBack={() => setView('list')} onNavigate={navigateAndReset} date={date} />
+  if (view === 'snap' || view === 'snap-paid') {
+    return <SnapMealForm onBack={() => setView('list')} onNavigate={navigateAndReset} date={date} paid={view === 'snap-paid'} />
   }
 
-  if (view === 'describe') {
-    return <DescribeMealForm onBack={() => setView('list')} onNavigate={navigateAndReset} date={date} />
+  if (view === 'describe' || view === 'describe-paid') {
+    return <DescribeMealForm onBack={() => setView('list')} onNavigate={navigateAndReset} date={date} paid={view === 'describe-paid'} />
   }
 
   const mealEntries = Object.entries(savedMeals)
@@ -109,18 +109,34 @@ export default function LogMeal({ onNavigate, date }) {
       >
         Log Custom Meal / Ingredient
       </button>
-      <button
-        onClick={() => setView('snap')}
-        className="w-full bg-amber-600 text-white py-3 rounded-lg font-semibold mb-2 min-h-[48px] active:bg-amber-700"
-      >
-        Snap Meal
-      </button>
-      <button
-        onClick={() => setView('describe')}
-        className="w-full bg-purple-600 text-white py-3 rounded-lg font-semibold mb-4 min-h-[48px] active:bg-purple-700"
-      >
-        Describe Meal
-      </button>
+      <div className="grid grid-cols-2 gap-2 mb-2">
+        <button
+          onClick={() => setView('snap')}
+          className="bg-amber-600 text-white py-3 rounded-lg font-semibold min-h-[48px] active:bg-amber-700"
+        >
+          Snap (Free)
+        </button>
+        <button
+          onClick={() => setView('snap-paid')}
+          className="bg-amber-700 text-white py-3 rounded-lg font-semibold min-h-[48px] active:bg-amber-800"
+        >
+          Snap (Paid)
+        </button>
+      </div>
+      <div className="grid grid-cols-2 gap-2 mb-4">
+        <button
+          onClick={() => setView('describe')}
+          className="bg-purple-600 text-white py-3 rounded-lg font-semibold min-h-[48px] active:bg-purple-700"
+        >
+          Describe (Free)
+        </button>
+        <button
+          onClick={() => setView('describe-paid')}
+          className="bg-purple-700 text-white py-3 rounded-lg font-semibold min-h-[48px] active:bg-purple-800"
+        >
+          Describe (Paid)
+        </button>
+      </div>
 
       {loading && <p className="text-gray-400">Loading saved meals...</p>}
       {error && <p className="text-red-400">Error: {error}</p>}
@@ -565,7 +581,7 @@ function compressImage(file) {
   })
 }
 
-function DescribeMealForm({ onBack, onNavigate, date }) {
+function DescribeMealForm({ onBack, onNavigate, date, paid }) {
   const [step, setStep] = useState('input') // 'input', 'analyzing', 'result', 'error'
   const [text, setText] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
@@ -576,7 +592,7 @@ function DescribeMealForm({ onBack, onNavigate, date }) {
     if (!text.trim()) return
     setStep('analyzing')
     try {
-      const data = await describeMeal(text.trim())
+      const data = paid ? await describeMealPaid(text.trim()) : await describeMeal(text.trim())
       setName(data.name || 'Described meal')
       setItems((data.foods || []).map(f => ({
         item: f.item,
@@ -647,7 +663,7 @@ function DescribeMealForm({ onBack, onNavigate, date }) {
             <polyline points="15 18 9 12 15 6"/>
           </svg>
         </button>
-        <h1 className="text-2xl font-bold">Describe Meal</h1>
+        <h1 className="text-2xl font-bold">Describe Meal{paid ? ' (Paid)' : ''}</h1>
       </div>
 
       {step === 'input' && (
@@ -756,7 +772,7 @@ function DescribeMealForm({ onBack, onNavigate, date }) {
   )
 }
 
-function SnapMealForm({ onBack, onNavigate, date }) {
+function SnapMealForm({ onBack, onNavigate, date, paid }) {
   const [step, setStep] = useState('capture') // 'capture', 'analyzing', 'result', 'error'
   const [preview, setPreview] = useState(null)
   const [errorMsg, setErrorMsg] = useState('')
@@ -770,7 +786,7 @@ function SnapMealForm({ onBack, onNavigate, date }) {
     setStep('analyzing')
     try {
       const base64 = await compressImage(file)
-      const data = await analyzeFood(base64)
+      const data = paid ? await analyzeFoodPaid(base64) : await analyzeFood(base64)
       setName(data.name || 'Photo meal')
       setItems((data.foods || []).map(f => ({
         item: f.item,
@@ -842,14 +858,20 @@ function SnapMealForm({ onBack, onNavigate, date }) {
             <polyline points="15 18 9 12 15 6"/>
           </svg>
         </button>
-        <h1 className="text-2xl font-bold">Snap Meal</h1>
+        <h1 className="text-2xl font-bold">Snap Meal{paid ? ' (Paid)' : ''}</h1>
       </div>
 
       {step === 'capture' && (
-        <label className="block w-full bg-amber-600 text-white text-center py-8 rounded-lg font-semibold text-lg cursor-pointer active:bg-amber-700">
-          Take Photo
-          <input type="file" accept="image/*" capture="environment" onChange={handleCapture} className="hidden" />
-        </label>
+        <div className="space-y-3">
+          <label className="block w-full bg-amber-600 text-white text-center py-8 rounded-lg font-semibold text-lg cursor-pointer active:bg-amber-700">
+            Take Photo
+            <input type="file" accept="image/*" capture="environment" onChange={handleCapture} className="hidden" />
+          </label>
+          <label className="block w-full bg-gray-700 text-white text-center py-8 rounded-lg font-semibold text-lg cursor-pointer active:bg-gray-600">
+            Upload from Gallery
+            <input type="file" accept="image/*" onChange={handleCapture} className="hidden" />
+          </label>
+        </div>
       )}
 
       {step === 'analyzing' && (

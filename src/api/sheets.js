@@ -32,4 +32,6 @@ export const deleteBodyLog = (date, weight, fat) => callApi('deleteBodyLog', { d
 export const getMealUsageCounts = () => callApi('getMealUsageCounts')
 export const analyzeFood = (image) => callApi('analyzeFood', { image })
 export const describeMeal = (text) => callApi('describeMeal', { text })
+export const analyzeFoodPaid = (image) => callApi('analyzeFoodPaid', { image })
+export const describeMealPaid = (text) => callApi('describeMealPaid', { text })
 export const addIngredient = (ingredient) => callApi('addIngredient', { ingredient })
