@@ -15,6 +15,7 @@ export default function LogMeal({ onNavigate, date }) {
   const [toast, setToast] = useState(null)
   const [usageCounts, setUsageCounts] = useState({})
   const [editingMeal, setEditingMeal] = useState(null)
+  const [mealSearch, setMealSearch] = useState('')
 
   function loadSavedMeals() {
     setLoading(true)
@@ -84,8 +85,23 @@ export default function LogMeal({ onNavigate, date }) {
     return <DescribeMealForm onBack={() => setView('list')} onNavigate={navigateAndReset} date={date} paid={view === 'describe-paid'} />
   }
 
-  const mealEntries = Object.entries(savedMeals)
-    .sort((a, b) => (usageCounts[b[0]] || 0) - (usageCounts[a[0]] || 0))
+  const mealEntries = useMemo(() => {
+    const byUsage = (a, b) => (usageCounts[b[0]] || 0) - (usageCounts[a[0]] || 0)
+    const entries = Object.entries(savedMeals)
+    const q = mealSearch.trim().toLowerCase()
+    if (!q) return entries.sort(byUsage)
+    return entries
+      .filter(([, rows]) => (rows[0].Meal_Name || '').toLowerCase().includes(q))
+      .sort((a, b) => {
+        const an = (a[1][0].Meal_Name || '').toLowerCase()
+        const bn = (b[1][0].Meal_Name || '').toLowerCase()
+        const aExact = an === q, bExact = bn === q
+        if (aExact !== bExact) return aExact ? -1 : 1
+        const aStarts = an.startsWith(q), bStarts = bn.startsWith(q)
+        if (aStarts !== bStarts) return aStarts ? -1 : 1
+        return byUsage(a, b)
+      })
+  }, [savedMeals, usageCounts, mealSearch])
 
   return (
     <div className="p-4">
@@ -141,8 +157,32 @@ export default function LogMeal({ onNavigate, date }) {
       {loading && <p className="text-gray-400">Loading saved meals...</p>}
       {error && <p className="text-red-400">Error: {error}</p>}
 
+      {!loading && Object.keys(savedMeals).length > 0 && (
+        <div className="relative mb-3">
+          <input
+            type="text"
+            placeholder="Search saved meals..."
+            value={mealSearch}
+            onChange={e => setMealSearch(e.target.value)}
+            className="w-full bg-gray-800 rounded-lg p-3 pr-12 text-white placeholder-gray-500"
+          />
+          {mealSearch && (
+            <button
+              onClick={() => setMealSearch('')}
+              className="absolute right-0 top-0 h-full w-12 flex items-center justify-center text-gray-400"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
+                <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+            </button>
+          )}
+        </div>
+      )}
+
       {!loading && mealEntries.length === 0 && (
-        <p className="text-gray-400">No saved meals yet. Create your first one!</p>
+        <p className="text-gray-400">
+          {mealSearch.trim() ? `No meals matching "${mealSearch.trim()}"` : 'No saved meals yet. Create your first one!'}
+        </p>
       )}
 
       <div className="space-y-3">
