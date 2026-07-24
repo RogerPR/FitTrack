@@ -31,6 +31,25 @@ export default function LogMeal({ onNavigate, date }) {
 
   useEffect(() => { loadSavedMeals() }, [])
 
+  // Must stay above the early returns below — hooks can't run conditionally
+  const mealEntries = useMemo(() => {
+    const byUsage = (a, b) => (usageCounts[b[0]] || 0) - (usageCounts[a[0]] || 0)
+    const entries = Object.entries(savedMeals)
+    const q = mealSearch.trim().toLowerCase()
+    if (!q) return entries.sort(byUsage)
+    return entries
+      .filter(([, rows]) => (rows[0].Meal_Name || '').toLowerCase().includes(q))
+      .sort((a, b) => {
+        const an = (a[1][0].Meal_Name || '').toLowerCase()
+        const bn = (b[1][0].Meal_Name || '').toLowerCase()
+        const aExact = an === q, bExact = bn === q
+        if (aExact !== bExact) return aExact ? -1 : 1
+        const aStarts = an.startsWith(q), bStarts = bn.startsWith(q)
+        if (aStarts !== bStarts) return aStarts ? -1 : 1
+        return byUsage(a, b)
+      })
+  }, [savedMeals, usageCounts, mealSearch])
+
   function showToast(msg) {
     setToast(msg)
     setTimeout(() => setToast(null), 2500)
@@ -84,24 +103,6 @@ export default function LogMeal({ onNavigate, date }) {
   if (view === 'describe' || view === 'describe-paid') {
     return <DescribeMealForm onBack={() => setView('list')} onNavigate={navigateAndReset} date={date} paid={view === 'describe-paid'} />
   }
-
-  const mealEntries = useMemo(() => {
-    const byUsage = (a, b) => (usageCounts[b[0]] || 0) - (usageCounts[a[0]] || 0)
-    const entries = Object.entries(savedMeals)
-    const q = mealSearch.trim().toLowerCase()
-    if (!q) return entries.sort(byUsage)
-    return entries
-      .filter(([, rows]) => (rows[0].Meal_Name || '').toLowerCase().includes(q))
-      .sort((a, b) => {
-        const an = (a[1][0].Meal_Name || '').toLowerCase()
-        const bn = (b[1][0].Meal_Name || '').toLowerCase()
-        const aExact = an === q, bExact = bn === q
-        if (aExact !== bExact) return aExact ? -1 : 1
-        const aStarts = an.startsWith(q), bStarts = bn.startsWith(q)
-        if (aStarts !== bStarts) return aStarts ? -1 : 1
-        return byUsage(a, b)
-      })
-  }, [savedMeals, usageCounts, mealSearch])
 
   return (
     <div className="p-4">
