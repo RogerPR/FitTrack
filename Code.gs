@@ -33,6 +33,10 @@ function doPost(e) {
       case 'analyzeFoodPaid':      return respond(handleAnalyzeFoodPaid(body));
       case 'describeMealPaid':     return respond(handleDescribeMealPaid(body));
       case 'addIngredient':        return respond(handleAddIngredient(body));
+      case 'getObjectives':        return respond(handleGetObjectives());
+      case 'addObjective':         return respond(handleAddObjective(body));
+      case 'updateObjective':      return respond(handleUpdateObjective(body));
+      case 'deleteObjective':      return respond(handleDeleteObjective(body));
       default: return respond({ success: false, error: 'Unknown action: ' + body.action });
     }
   } catch (err) {
@@ -112,7 +116,8 @@ function setup() {
     'Saved Routines':  ['Routine_ID', 'Routine_Name', 'Exercise', 'Order'],
     'Daily Workouts':  ['Date', 'Routine_ID', 'Routine_Name', 'Exercise', 'Set_Num', 'Reps', 'Weight_kg'],
     'Goals':           ['Calories', 'Protein', 'Carbs', 'Fat'],
-    'Body Log':        ['Date', 'Weight_kg', 'Fat_pct']
+    'Body Log':        ['Date', 'Weight_kg', 'Fat_pct'],
+    'Objectives':      ['Objective_ID', 'Term', 'Text', 'Start_Date', 'Due_Date', 'Completed', 'Score']
   };
 
   var names = Object.keys(tabs);
@@ -545,6 +550,61 @@ function handleDescribeMealPaid(body) {
 function handleAddIngredient(body) {
   if (!body.ingredient || !body.ingredient.Name) return { success: false, error: 'No ingredient name provided' };
   appendRows('Ingredients', [body.ingredient]);
+  return { success: true, data: null };
+}
+
+function handleGetObjectives() {
+  return { success: true, data: getSheetData('Objectives') };
+}
+
+function handleAddObjective(body) {
+  if (!body.objective || !body.objective.Objective_ID) return { success: false, error: 'No objective provided' };
+  appendRows('Objectives', [body.objective]);
+  return { success: true, data: null };
+}
+
+function handleUpdateObjective(body) {
+  var sheet = getSheet('Objectives');
+  var data = sheet.getDataRange().getValues();
+  if (data.length < 2) return { success: true, data: null };
+
+  var headers = data[0];
+  var idCol = headers.indexOf('Objective_ID');
+  var fields = body.fields || {};
+  var keys = Object.keys(fields);
+
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][idCol]) !== String(body.id)) continue;
+    for (var k = 0; k < keys.length; k++) {
+      var col = headers.indexOf(keys[k]);
+      if (col >= 0) sheet.getRange(i + 1, col + 1).setValue(fields[keys[k]]);
+    }
+    break;
+  }
+
+  return { success: true, data: null };
+}
+
+function handleDeleteObjective(body) {
+  var sheet = getSheet('Objectives');
+  var data = sheet.getDataRange().getValues();
+  if (data.length < 2) return { success: true, data: null };
+
+  var headers = data[0];
+  var idCol = headers.indexOf('Objective_ID');
+
+  var rowsToDelete = [];
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][idCol]) === String(body.id)) {
+      rowsToDelete.push(i + 1);
+    }
+  }
+
+  // Delete bottom-to-top to avoid index shifting
+  for (var j = rowsToDelete.length - 1; j >= 0; j--) {
+    sheet.deleteRow(rowsToDelete[j]);
+  }
+
   return { success: true, data: null };
 }
 

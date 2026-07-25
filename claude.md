@@ -74,6 +74,14 @@ Static reference. Categories: Biceps, Triceps, Chest, Pull, Legs, Abs.
 
 Date format: YYYY-MM-DD.
 
+### Tab: "Objectives"
+| Objective_ID | Term | Text | Start_Date | Due_Date | Completed | Score |
+|--------------|------|------|------------|----------|-----------|-------|
+
+One row per objective. `Term` is `short` (2 weeks) or `mid` (3 months). `Completed` is `y` or empty —
+deliberately not TRUE/FALSE, since Sheets coerces those to booleans. `Score` is 1-5 or empty.
+Dates are YYYY-MM-DD.
+
 ## Frontend Screens
 
 ### 1. Dashboard (home screen)
@@ -137,6 +145,10 @@ Endpoints (actions):
 - `logWorkout` → writes rows to Daily Workouts tab
 - `getDailyWorkout(date)` → returns workout for a given date
 - `getLastWorkoutWeights(routineId)` → returns most recent weights for a routine's exercises
+- `getObjectives` → returns all rows from the Objectives tab (flat array)
+- `addObjective(objective)` → appends one objective row
+- `updateObjective(id, fields)` → sets the given columns on the matching Objective_ID row
+- `deleteObjective(id)` → removes the objective row
 
 All responses: `{ success: true, data: ... }` or `{ success: false, error: "message" }`.
 
@@ -152,7 +164,8 @@ All responses: `{ success: true, data: ... }` or `{ success: false, error: "mess
 - `src/components/Dashboard.jsx` — Daily summary, macro totals, meal/workout lists, refresh button
 - `src/components/LogMeal.jsx` — Saved meals list, "Log to Today", Create Meal flow
 - `src/components/LogWorkout.jsx` — Saved routines, Create Routine, Log Workout Session with pre-fill
-- `src/api/sheets.js` — All 12 API functions (POST to Apps Script)
+- `src/components/Objectives.jsx` — Objectives sub-app: short/mid term collapsible sections, add/score/finish/re-add/remove
+- `src/api/sheets.js` — All API functions (POST to Apps Script)
 - `src/config.js` — API_URL (gitignored, generated in CI from secret)
 - `src/data/ingredients.json` — 24 ingredients with macros (local cache)
 - `src/data/exercises.json` — 20 exercises with categories (local cache)

@@ -3,6 +3,7 @@ import Dashboard from './components/Dashboard'
 import LogMeal from './components/LogMeal'
 import LogWorkout from './components/LogWorkout'
 import Settings from './components/Settings'
+import Objectives from './components/Objectives'
 
 const tabs = [
   { id: 'dashboard', label: 'Dashboard', icon: (
@@ -27,6 +28,13 @@ const tabs = [
       <rect x="2" y="4" width="4" height="16" rx="1"/>
       <rect x="18" y="4" width="4" height="16" rx="1"/>
       <line x1="12" y1="4" x2="12" y2="20"/>
+    </svg>
+  )},
+  { id: 'objectives', label: 'Objectives', icon: (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6">
+      <circle cx="12" cy="12" r="10"/>
+      <circle cx="12" cy="12" r="6"/>
+      <circle cx="12" cy="12" r="2"/>
     </svg>
   )},
   { id: 'more', label: 'More', icon: (
@@ -113,6 +121,7 @@ export default function App() {
       <div className={active === 'dashboard' ? '' : 'hidden'}><Dashboard onNavigate={setActive} refreshKey={refreshKey} date={activeDate} onDateChange={setActiveDate} /></div>
       <div className={active === 'meal' ? '' : 'hidden'}><LogMeal onNavigate={navigateWithRefresh} date={activeDate} /></div>
       <div className={active === 'workout' ? '' : 'hidden'}><LogWorkout date={activeDate} /></div>
+      <div className={active === 'objectives' ? '' : 'hidden'}><Objectives onNavigate={setActive} /></div>
       <div className={active === 'more' ? '' : 'hidden'}><Settings /></div>
 
       <nav className="fixed bottom-0 left-0 right-0 bg-gray-900 border-t border-gray-800 flex justify-around">
@@ -120,12 +129,12 @@ export default function App() {
           <button
             key={tab.id}
             onClick={() => setActive(tab.id)}
-            className={`flex flex-col items-center py-3 px-4 min-h-[48px] min-w-[48px] ${
+            className={`flex flex-col items-center py-3 px-2 min-h-[48px] min-w-[48px] ${
               active === tab.id ? 'text-blue-400' : 'text-gray-500'
             }`}
           >
             {tab.icon}
-            <span className="text-xs mt-1">{tab.label}</span>
+            <span className="text-[10px] mt-1 whitespace-nowrap">{tab.label}</span>
           </button>
         ))}
       </nav>
