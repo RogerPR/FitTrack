@@ -29,7 +29,9 @@ Google Apps Script has native Sheets access — no API keys or OAuth tokens need
 - **PWA:** Service worker + manifest for Android home-screen install
 
 ## Critical Constraints
-- **FREE ONLY.** No paid services, no paid APIs, no paid hosting.
+- **FREE HOSTING, CHEAP APIS.** No paid hosting, no subscriptions. The one exception is the Claude
+  API, used for meal estimation and the objectives coach — pay-per-token, cents per month at
+  single-user volume. Everything else stays free.
 - **SINGLE USER.** No auth, no multi-user, no login screen. Just me.
 - **SIMPLE OVER CLEVER.** Minimal dependencies, no over-engineering. If a feature can be done in 20 lines instead of pulling in a library, do it in 20 lines.
 - **STABLE OVER PRETTY.** Reliability matters more than aesthetics. A working ugly button beats a broken beautiful one.
@@ -78,9 +80,18 @@ Date format: YYYY-MM-DD.
 | Objective_ID | Term | Text | Start_Date | Due_Date | Completed | Score |
 |--------------|------|------|------------|----------|-----------|-------|
 
-One row per objective. `Term` is `short` (2 weeks) or `mid` (3 months). `Completed` is `y` or empty —
-deliberately not TRUE/FALSE, since Sheets coerces those to booleans. `Score` is 1-5 or empty.
-Dates are YYYY-MM-DD.
+One row per objective. `Term` is `short` (2 weeks), `mid` (3 months), or `long` (no deadline).
+**Long-term objectives leave `Due_Date` empty** — every reader must handle that. `Completed` is `y`
+or empty — deliberately not TRUE/FALSE, since Sheets coerces those to booleans. `Score` is 1-5 or
+empty. Dates are YYYY-MM-DD.
+
+### Tab: "Objective Steps"
+| Step_ID | Objective_ID | Step_Num | Text | Done |
+|---------|--------------|----------|------|------|
+
+One row per step. Identity is `Step_ID` (client-minted, `step_<timestamp>_<i>`) — `Step_Num` is
+display order only, so appending never renumbers existing rows. `Done` is `y` or empty, same
+boolean-coercion reason as `Completed`. Deleting an objective cascades to its steps server-side.
 
 ## Frontend Screens
 
@@ -148,9 +159,45 @@ Endpoints (actions):
 - `getObjectives` → returns all rows from the Objectives tab (flat array)
 - `addObjective(objective)` → appends one objective row
 - `updateObjective(id, fields)` → sets the given columns on the matching Objective_ID row
-- `deleteObjective(id)` → removes the objective row
+- `deleteObjective(id)` → removes the objective row, and cascades to its steps
+- `getObjectiveSteps` → returns all rows from the Objective Steps tab (flat array)
+- `addObjectiveSteps(steps)` → appends step rows
+- `updateObjectiveStep(id, fields)` → sets the given columns on the matching Step_ID row
+- `deleteObjectiveStep(id)` → removes the step row
+- `objectivesChat(messages, model)` → multi-turn chat over the objectives context → `{ reply }`
+- `suggestSteps(objectiveId, model)` → generates 2-10 steps for one objective → `{ steps: [...] }`
+- `getGoals` / `saveGoals(goals)` → macro targets
+- `getBodyLog` / `logBody(entry)` / `deleteBodyLog(date, weight, fat)` → weight and body-fat log
+- `getMealUsageCounts` → how often each saved meal has been logged
+- `addIngredient(ingredient)` → appends one ingredient row
+- `analyzeFood(image)` / `describeMeal(text)` → macro estimation via Gemini (free tier)
+- `analyzeFoodPaid(image)` / `describeMealPaid(text)` → same, via Claude
 
 All responses: `{ success: true, data: ... }` or `{ success: false, error: "message" }`.
+
+## LLM Usage
+
+Two providers, both called server-side from `Code.gs` via `UrlFetchApp`. No SDK (Apps Script has no
+npm) and no key ever reaches the frontend.
+
+| Feature | Model | Notes |
+|---------|-------|-------|
+| `analyzeFood`, `describeMeal` | `gemini-2.5-flash` | Free tier |
+| `analyzeFoodPaid`, `describeMealPaid` | `claude-sonnet-4-6` | |
+| `objectivesChat`, `suggestSteps` | `claude-sonnet-5` default, `claude-opus-5` via toggle | Model choice persists in `localStorage['fittrack_ai_model']` |
+
+Objectives AI notes:
+- `buildObjectivesContext()` in `Code.gs` renders every objective, its dates, and its steps into one
+  text block shared by both features. It goes in the `system` parameter. **The frontend never sends
+  the objectives** — the backend reads the Sheet directly.
+- Overdue days are precomputed server-side rather than left for the model to derive from dates.
+- Keep adaptive thinking on and control cost with `output_config.effort` (`low` for chat, `medium`
+  for steps). Explicitly disabling thinking on Opus 5 leaks `<thinking>` tags into the reply, and is
+  a 400 at `xhigh`/`max` effort.
+- With adaptive thinking on, `content[0]` may be a thinking block — collect the `text` blocks
+  instead of indexing. `callClaude()` does this.
+- **No streaming is possible in Apps Script.** `UrlFetchApp` blocks, so a chat turn is one round
+  trip with a pending indicator. `effort: 'low'` is the main latency lever.
 
 ## Deployment & Infrastructure
 - **Frontend:** GitHub Pages, auto-deployed via GitHub Actions on push to `main` (`.github/workflows/deploy.yml`)
@@ -164,7 +211,8 @@ All responses: `{ success: true, data: ... }` or `{ success: false, error: "mess
 - `src/components/Dashboard.jsx` — Daily summary, macro totals, meal/workout lists, refresh button
 - `src/components/LogMeal.jsx` — Saved meals list, "Log to Today", Create Meal flow
 - `src/components/LogWorkout.jsx` — Saved routines, Create Routine, Log Workout Session with pre-fill
-- `src/components/Objectives.jsx` — Objectives sub-app: short/mid term collapsible sections, add/score/finish/re-add/remove
+- `src/components/Objectives.jsx` — Objectives sub-app: short/mid/long term collapsible sections, add/score/finish/re-add/remove, per-objective steps
+- `src/components/ObjectivesChat.jsx` — Goal-coach chat with starter prompts and a Sonnet/Opus toggle
 - `src/api/sheets.js` — All API functions (POST to Apps Script)
 - `src/config.js` — API_URL (gitignored, generated in CI from secret)
 - `src/data/ingredients.json` — 24 ingredients with macros (local cache)
@@ -173,6 +221,8 @@ All responses: `{ success: true, data: ... }` or `{ success: false, error: "mess
 
 ## Known Gotchas
 - **Apps Script `instanceof Date` is broken.** `getValues()` returns Date objects that fail `instanceof Date`. Use `typeof val.getTime === 'function'` instead.
+- **`setup()` must be re-run after adding a Sheets tab.** It is idempotent and won't touch existing data, but a missing tab surfaces as a runtime error on the first read.
+- **Long-term objectives have no `Due_Date`.** `daysUntil()` returns `null` for an empty date rather than `NaN`; anything rendering a due date or urgency colour must branch on it.
 - **Apps Script deployment versioning.** Editing code in the script editor does NOT update the live web app. Must: Manage deployments → edit → Version: "New version" → Deploy.
 - **`src/config.js` is gitignored.** The API URL is injected via the `VITE_API_URL` GitHub Actions secret during CI build. Update both local file and secret when the deployment URL changes.
 

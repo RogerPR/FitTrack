@@ -37,6 +37,12 @@ function doPost(e) {
       case 'addObjective':         return respond(handleAddObjective(body));
       case 'updateObjective':      return respond(handleUpdateObjective(body));
       case 'deleteObjective':      return respond(handleDeleteObjective(body));
+      case 'getObjectiveSteps':    return respond(handleGetObjectiveSteps());
+      case 'addObjectiveSteps':    return respond(handleAddObjectiveSteps(body));
+      case 'updateObjectiveStep':  return respond(handleUpdateObjectiveStep(body));
+      case 'deleteObjectiveStep':  return respond(handleDeleteObjectiveStep(body));
+      case 'objectivesChat':       return respond(handleObjectivesChat(body));
+      case 'suggestSteps':         return respond(handleSuggestSteps(body));
       default: return respond({ success: false, error: 'Unknown action: ' + body.action });
     }
   } catch (err) {
@@ -103,6 +109,46 @@ function groupBy(rows, key) {
   return groups;
 }
 
+// Sets the given columns on the first row whose idHeader matches id.
+function updateRowById(sheetName, idHeader, id, fields) {
+  var sheet = getSheet(sheetName);
+  var data = sheet.getDataRange().getValues();
+  if (data.length < 2) return;
+
+  var headers = data[0];
+  var idCol = headers.indexOf(idHeader);
+  var keys = Object.keys(fields || {});
+
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][idCol]) !== String(id)) continue;
+    for (var k = 0; k < keys.length; k++) {
+      var col = headers.indexOf(keys[k]);
+      if (col >= 0) sheet.getRange(i + 1, col + 1).setValue(fields[keys[k]]);
+    }
+    break;
+  }
+}
+
+// Deletes every row whose header column matches value. Bottom-to-top to avoid index shifting.
+function deleteRowsWhere(sheetName, header, value) {
+  var sheet = getSheet(sheetName);
+  if (!sheet) return 0;
+  var data = sheet.getDataRange().getValues();
+  if (data.length < 2) return 0;
+
+  var col = data[0].indexOf(header);
+  if (col < 0) return 0;
+
+  var count = 0;
+  for (var i = data.length - 1; i >= 1; i--) {
+    if (String(data[i][col]) === String(value)) {
+      sheet.deleteRow(i + 1);
+      count++;
+    }
+  }
+  return count;
+}
+
 // --- Setup (run once) ---
 
 function setup() {
@@ -117,7 +163,8 @@ function setup() {
     'Daily Workouts':  ['Date', 'Routine_ID', 'Routine_Name', 'Exercise', 'Set_Num', 'Reps', 'Weight_kg'],
     'Goals':           ['Calories', 'Protein', 'Carbs', 'Fat'],
     'Body Log':        ['Date', 'Weight_kg', 'Fat_pct'],
-    'Objectives':      ['Objective_ID', 'Term', 'Text', 'Start_Date', 'Due_Date', 'Completed', 'Score']
+    'Objectives':      ['Objective_ID', 'Term', 'Text', 'Start_Date', 'Due_Date', 'Completed', 'Score'],
+    'Objective Steps': ['Step_ID', 'Objective_ID', 'Step_Num', 'Text', 'Done']
   };
 
   var names = Object.keys(tabs);
@@ -605,7 +652,240 @@ function handleDeleteObjective(body) {
     sheet.deleteRow(rowsToDelete[j]);
   }
 
+  // Don't leave the objective's steps orphaned.
+  deleteRowsWhere('Objective Steps', 'Objective_ID', body.id);
+
   return { success: true, data: null };
+}
+
+// --- Objective steps ---
+
+function handleGetObjectiveSteps() {
+  if (!getSheet('Objective Steps')) {
+    return { success: false, error: 'Objective Steps tab is missing - run setup() in the Apps Script editor' };
+  }
+  return { success: true, data: getSheetData('Objective Steps') };
+}
+
+function handleAddObjectiveSteps(body) {
+  var steps = body.steps || [];
+  if (!steps.length) return { success: false, error: 'No steps provided' };
+  appendRows('Objective Steps', steps);
+  return { success: true, data: null };
+}
+
+function handleUpdateObjectiveStep(body) {
+  updateRowById('Objective Steps', 'Step_ID', body.id, body.fields);
+  return { success: true, data: null };
+}
+
+function handleDeleteObjectiveStep(body) {
+  deleteRowsWhere('Objective Steps', 'Step_ID', body.id);
+  return { success: true, data: null };
+}
+
+// --- Objectives AI ---
+
+var CLAUDE_MODELS = { sonnet: 'claude-sonnet-5', opus: 'claude-opus-5' };
+
+function callClaude(modelKey, system, messages, maxTokens, effort) {
+  var payload = {
+    model: CLAUDE_MODELS[modelKey] || CLAUDE_MODELS.sonnet,
+    max_tokens: maxTokens,
+    system: system,
+    messages: messages,
+    thinking: { type: 'adaptive' },
+    output_config: { effort: effort }
+  };
+
+  var res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
+    method: 'post',
+    contentType: 'application/json',
+    headers: {
+      'x-api-key': ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01'
+    },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  });
+
+  if (res.getResponseCode() !== 200) {
+    return { ok: false, error: 'Claude API error: ' + res.getContentText().substring(0, 200) };
+  }
+
+  var result = JSON.parse(res.getContentText());
+  if (result.stop_reason === 'refusal') {
+    return { ok: false, error: 'Claude declined to answer that one.' };
+  }
+
+  // Adaptive thinking puts thinking blocks in content alongside the text, so
+  // content[0] is not reliably the answer - collect the text blocks instead.
+  var text = '';
+  for (var i = 0; i < result.content.length; i++) {
+    if (result.content[i].type === 'text') text += result.content[i].text;
+  }
+  if (!text) return { ok: false, error: 'Empty response from Claude' };
+
+  return { ok: true, text: text };
+}
+
+function todayStr() {
+  return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+}
+
+function daysBetween(fromStr, toStr) {
+  return Math.round((new Date(toStr + 'T00:00:00') - new Date(fromStr + 'T00:00:00')) / 86400000);
+}
+
+function describeObjective(o, objSteps, today) {
+  var line = '- [' + o.Objective_ID + '] "' + o.Text + '" - started ' + o.Start_Date;
+
+  if (o.Due_Date) {
+    var left = daysBetween(today, String(o.Due_Date));
+    line += ', due ' + o.Due_Date;
+    line += left < 0 ? ' (OVERDUE by ' + Math.abs(left) + ' days)' : ' (' + left + ' days left)';
+  } else {
+    line += ', no deadline';
+  }
+
+  line += o.Score ? '. Score ' + o.Score + '/5.' : '. No score yet.';
+
+  var list = objSteps || [];
+  if (!list.length) return line + '\n  No steps yet.';
+
+  list.sort(function (a, b) { return Number(a.Step_Num) - Number(b.Step_Num); });
+  var parts = [];
+  for (var i = 0; i < list.length; i++) {
+    parts.push((String(list[i].Done) === 'y' ? '[x] ' : '[ ] ') + list[i].Text);
+  }
+  return line + '\n  Steps: ' + parts.join('; ');
+}
+
+// The shared context block for both AI features. Built here rather than sent by
+// the client so it is always fresh and there is one copy of the format.
+function buildObjectivesContext() {
+  var objectives = getSheetData('Objectives');
+  var steps = getSheet('Objective Steps') ? getSheetData('Objective Steps') : [];
+  var stepsByObj = groupBy(steps, 'Objective_ID');
+  var today = todayStr();
+
+  var terms = [
+    { id: 'short', label: 'Short term (2 weeks)' },
+    { id: 'mid',   label: 'Mid term (3 months)' },
+    { id: 'long',  label: 'Long term (no deadline)' }
+  ];
+
+  var out = ['# My objectives (today is ' + today + ')'];
+
+  for (var t = 0; t < terms.length; t++) {
+    var lines = [];
+    for (var i = 0; i < objectives.length; i++) {
+      var o = objectives[i];
+      if (String(o.Term) !== terms[t].id || String(o.Completed) === 'y') continue;
+      lines.push(describeObjective(o, stepsByObj[o.Objective_ID], today));
+    }
+    out.push('');
+    out.push('## ' + terms[t].label);
+    out.push(lines.length ? lines.join('\n') : '- (none yet)');
+  }
+
+  // Completed objectives from every term, flattened - useful history, not worth full detail.
+  var completed = [];
+  for (var c = 0; c < objectives.length; c++) {
+    if (String(objectives[c].Completed) === 'y') completed.push(objectives[c]);
+  }
+  if (completed.length) {
+    out.push('');
+    out.push('## Completed');
+    for (var d = 0; d < completed.length; d++) {
+      var co = completed[d];
+      out.push('- "' + co.Text + '" (' + co.Term + ' term' + (co.Score ? ', scored ' + co.Score + '/5' : '') + ')');
+    }
+  }
+
+  return out.join('\n');
+}
+
+function handleObjectivesChat(body) {
+  var messages = body.messages || [];
+  if (!messages.length) return { success: false, error: 'No messages provided' };
+
+  var system = [
+    'You are a personal goal coach inside FitTrack, a fitness and nutrition tracker used by one person on their phone.',
+    '',
+    'How to respond:',
+    '- Be brief. A few short sentences, or one short paragraph. No headings, no long bullet lists.',
+    '- Be concrete. A specific next action beats general encouragement.',
+    '- Be honest about overdue objectives rather than glossing over them.',
+    '- Long term objectives have no deadline on purpose. Treat them as direction, not something to chase a date on.',
+    '- Use metric units: kilograms and grams.',
+    '- Refer to objectives by their text, never by their ID.',
+    '',
+    'The user\'s current objectives and steps:',
+    '',
+    buildObjectivesContext()
+  ].join('\n');
+
+  var res = callClaude(body.model, system, messages, 2048, 'low');
+  if (!res.ok) return { success: false, error: res.error };
+
+  return { success: true, data: { reply: res.text } };
+}
+
+function handleSuggestSteps(body) {
+  if (!body.objectiveId) return { success: false, error: 'No objective provided' };
+
+  var objectives = getSheetData('Objectives');
+  var target = null;
+  for (var i = 0; i < objectives.length; i++) {
+    if (String(objectives[i].Objective_ID) === String(body.objectiveId)) {
+      target = objectives[i];
+      break;
+    }
+  }
+  if (!target) return { success: false, error: 'Objective not found' };
+
+  var system = [
+    'You break personal objectives down into concrete, actionable steps.',
+    'You can see all of the user\'s objectives, so avoid proposing steps that duplicate another objective or pull against a long term one.',
+    'Use metric units: kilograms and grams.',
+    '',
+    buildObjectivesContext()
+  ].join('\n');
+
+  var user = [
+    'Generate steps for this objective: [' + target.Objective_ID + '] "' + target.Text + '"',
+    '',
+    'Rules:',
+    '- Between 2 and 10 steps. Fewer is better if fewer will do.',
+    '- Each step is one concrete action that can be finished and ticked off.',
+    '- Order them so each step builds on the one before it.',
+    '- Keep each step under 12 words.',
+    '- Do not repeat steps this objective already has.',
+    '',
+    'Respond with ONLY a JSON object in this exact format: {"steps": ["first step", "second step"]}'
+  ].join('\n');
+
+  var res = callClaude(body.model, system, [{ role: 'user', content: user }], 1536, 'medium');
+  if (!res.ok) return { success: false, error: res.error };
+
+  var text = res.text.replace(/```json\s*/i, '').replace(/```\s*$/, '').trim();
+  var parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (err) {
+    return { success: false, error: 'Could not read steps from the response' };
+  }
+
+  var raw = parsed.steps || [];
+  var steps = [];
+  for (var s = 0; s < raw.length && steps.length < 10; s++) {
+    var t = String(raw[s]).trim();
+    if (t) steps.push(t);
+  }
+  if (!steps.length) return { success: false, error: 'No steps came back' };
+
+  return { success: true, data: { steps: steps } };
 }
 
 function handleDeleteBodyLog(body) {
