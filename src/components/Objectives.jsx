@@ -34,7 +34,7 @@ function isDone(o) {
 }
 
 // Cards sit *above* the group panel: lighter fill, light gray outline, drop shadow.
-const CARD = 'bg-gray-800 rounded-xl p-4 border border-gray-500 border-l-4 shadow-lg shadow-black/40'
+const CARD = 'bg-gray-800 rounded-xl p-4 border border-gray-400 border-l-4 shadow-lg shadow-black/40'
 
 // Left accent bar colour — urgency at a glance.
 function accent(o) {
@@ -53,6 +53,7 @@ export default function Objectives({ onNavigate }) {
   const [openCompleted, setOpenCompleted] = useState({ short: false, mid: false })
   const [addingTo, setAddingTo] = useState(null)
   const [newText, setNewText] = useState('')
+  const [expandedId, setExpandedId] = useState(null)
   const [editingId, setEditingId] = useState(null)
   const [editDraft, setEditDraft] = useState({ Text: '', Start_Date: '', Due_Date: '' })
   const [busy, setBusy] = useState(false)
@@ -116,6 +117,11 @@ export default function Objectives({ onNavigate }) {
     const score = Number(o.Score) === n ? '' : n
     const next = objectives.map(x => (x.Objective_ID === o.Objective_ID ? { ...x, Score: score } : x))
     persist(next, () => updateObjective(o.Objective_ID, { Score: score }), 'Failed to save score. Try again.')
+  }
+
+  function toggleExpand(id) {
+    setEditingId(null)
+    setExpandedId(cur => (cur === id ? null : id))
   }
 
   function startEdit(o) {
@@ -294,49 +300,61 @@ export default function Objectives({ onNavigate }) {
                         }
                         return (
                           <div key={o.Objective_ID} className={`${CARD} ${accent(o)}`}>
-                            <p className="font-semibold text-lg leading-snug">{o.Text}</p>
-                            <p className="text-sm text-gray-400 mt-1">
-                              {o.Start_Date} &rarr; {o.Due_Date} &middot;{' '}
-                              {left < 0
-                                ? <span className="text-red-400">Overdue by {Math.abs(left)} {Math.abs(left) === 1 ? 'day' : 'days'}</span>
-                                : <span>{left} {left === 1 ? 'day' : 'days'} left</span>}
-                            </p>
-
-                            <p className="text-xs text-gray-500 mt-3 mb-1">Score</p>
-                            <div className="grid grid-cols-5 gap-2">
-                              {[1, 2, 3, 4, 5].map(n => (
-                                <button
-                                  key={n}
-                                  onClick={() => handleScore(o, n)}
-                                  className={`py-3 rounded-lg font-semibold min-h-[48px] ${
-                                    Number(o.Score) === n ? 'bg-teal-600 text-white' : 'bg-gray-700 text-gray-300 active:bg-gray-600'
-                                  }`}
-                                >
-                                  {n}
-                                </button>
-                              ))}
-                            </div>
-
-                            <button
-                              onClick={() => handleFinish(o)}
-                              className="w-full mt-3 bg-green-600 text-white py-3 rounded-lg font-semibold min-h-[48px] active:bg-green-700"
-                            >
-                              Mark finished
+                            <button onClick={() => toggleExpand(o.Objective_ID)} className="w-full text-left flex justify-between items-start gap-3">
+                              <div>
+                                <p className="font-semibold text-lg leading-snug">{o.Text}</p>
+                                <p className="text-sm text-gray-400 mt-1">
+                                  {o.Start_Date} &rarr; {o.Due_Date} &middot;{' '}
+                                  {left < 0
+                                    ? <span className="text-red-400">Overdue by {Math.abs(left)} {Math.abs(left) === 1 ? 'day' : 'days'}</span>
+                                    : <span>{left} {left === 1 ? 'day' : 'days'} left</span>}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                {o.Score && <span className="text-sm text-teal-400">★ {o.Score}/5</span>}
+                                <span className="text-gray-500">{expandedId === o.Objective_ID ? '▲' : '▼'}</span>
+                              </div>
                             </button>
-                            <div className="grid grid-cols-2 gap-2 mt-2">
-                              <button
-                                onClick={() => startEdit(o)}
-                                className="text-gray-300 py-2 min-h-[44px] text-sm font-semibold"
-                              >
-                                Edit
-                              </button>
-                              <button
-                                onClick={() => handleRemove(o)}
-                                className="text-red-400 py-2 min-h-[44px] text-sm font-semibold"
-                              >
-                                Remove
-                              </button>
-                            </div>
+
+                            {expandedId === o.Objective_ID && (
+                              <>
+                                <p className="text-xs text-gray-500 mt-3 mb-1">Score</p>
+                                <div className="grid grid-cols-5 gap-2">
+                                  {[1, 2, 3, 4, 5].map(n => (
+                                    <button
+                                      key={n}
+                                      onClick={() => handleScore(o, n)}
+                                      className={`py-3 rounded-lg font-semibold min-h-[48px] ${
+                                        Number(o.Score) === n ? 'bg-teal-600 text-white' : 'bg-gray-700 text-gray-300 active:bg-gray-600'
+                                      }`}
+                                    >
+                                      {n}
+                                    </button>
+                                  ))}
+                                </div>
+
+                                <button
+                                  onClick={() => handleFinish(o)}
+                                  className="w-full mt-3 bg-green-600 text-white py-3 rounded-lg font-semibold min-h-[48px] active:bg-green-700"
+                                >
+                                  Mark finished
+                                </button>
+                                <div className="grid grid-cols-2 gap-2 mt-2">
+                                  <button
+                                    onClick={() => startEdit(o)}
+                                    className="text-gray-300 py-2 min-h-[44px] text-sm font-semibold"
+                                  >
+                                    Edit
+                                  </button>
+                                  <button
+                                    onClick={() => handleRemove(o)}
+                                    className="text-red-400 py-2 min-h-[44px] text-sm font-semibold"
+                                  >
+                                    Remove
+                                  </button>
+                                </div>
+                              </>
+                            )}
                           </div>
                         )
                       })}
@@ -357,27 +375,35 @@ export default function Objectives({ onNavigate }) {
                         {completed.length === 0 && <p className="text-gray-400 text-sm">Nothing completed yet.</p>}
                         {completed.map(o => (
                           <div key={o.Objective_ID} className={`${CARD} ${accent(o)}`}>
-                            <div className="flex justify-between items-start gap-3">
-                              <p className="font-semibold text-lg leading-snug">{o.Text}</p>
-                              <span className="text-sm text-teal-400 whitespace-nowrap">
-                                {o.Score ? '★ ' + o.Score + '/5' : 'Not rated'}
-                              </span>
-                            </div>
-                            <p className="text-sm text-gray-400 mt-1">{o.Start_Date} &rarr; {o.Due_Date}</p>
-                            <div className="grid grid-cols-2 gap-2 mt-3">
-                              <button
-                                onClick={() => handleReadd(o)}
-                                className="py-3 rounded-lg bg-gray-700 text-white font-semibold min-h-[48px] active:bg-gray-600"
-                              >
-                                Re-add
-                              </button>
-                              <button
-                                onClick={() => handleRemove(o)}
-                                className="py-3 rounded-lg bg-gray-900 text-red-400 font-semibold min-h-[48px] active:bg-gray-700"
-                              >
-                                Remove
-                              </button>
-                            </div>
+                            <button onClick={() => toggleExpand(o.Objective_ID)} className="w-full text-left flex justify-between items-start gap-3">
+                              <div>
+                                <p className="font-semibold text-lg leading-snug">{o.Text}</p>
+                                <p className="text-sm text-gray-400 mt-1">{o.Start_Date} &rarr; {o.Due_Date}</p>
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                <span className="text-sm text-teal-400 whitespace-nowrap">
+                                  {o.Score ? '★ ' + o.Score + '/5' : 'Not rated'}
+                                </span>
+                                <span className="text-gray-500">{expandedId === o.Objective_ID ? '▲' : '▼'}</span>
+                              </div>
+                            </button>
+
+                            {expandedId === o.Objective_ID && (
+                              <div className="grid grid-cols-2 gap-2 mt-3">
+                                <button
+                                  onClick={() => handleReadd(o)}
+                                  className="py-3 rounded-lg bg-gray-700 text-white font-semibold min-h-[48px] active:bg-gray-600"
+                                >
+                                  Re-add
+                                </button>
+                                <button
+                                  onClick={() => handleRemove(o)}
+                                  className="py-3 rounded-lg bg-gray-900 text-red-400 font-semibold min-h-[48px] active:bg-gray-700"
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
