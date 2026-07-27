@@ -33,6 +33,9 @@ function isDone(o) {
   return String(o.Completed) === 'y'
 }
 
+// Cards sit *above* the group panel: lighter fill, light gray outline, drop shadow.
+const CARD = 'bg-gray-800 rounded-xl p-4 border border-gray-500 border-l-4 shadow-lg shadow-black/40'
+
 // Left accent bar colour — urgency at a glance.
 function accent(o) {
   if (isDone(o)) return 'border-l-green-600'
@@ -197,7 +200,7 @@ export default function Objectives({ onNavigate }) {
                 </button>
 
                 {open && (
-                  <div className="px-4 pb-4 border-t border-gray-700 pt-3">
+                  <div className="px-4 pb-4 border-t border-gray-700 pt-3 bg-gray-900">
                     {addingTo === term.id ? (
                       <div className="bg-gray-700 rounded-lg p-3 mb-3">
                         <input
@@ -241,13 +244,13 @@ export default function Objectives({ onNavigate }) {
                         const left = daysUntil(o.Due_Date)
                         if (editingId === o.Objective_ID) {
                           return (
-                            <div key={o.Objective_ID} className={`bg-gray-900 rounded-lg p-4 border border-gray-600 border-l-4 ${accent(o)}`}>
+                            <div key={o.Objective_ID} className={`${CARD} ${accent(o)}`}>
                               <input
                                 type="text"
                                 value={editDraft.Text}
                                 onChange={e => setEditDraft(d => ({ ...d, Text: e.target.value }))}
                                 autoFocus
-                                className="w-full bg-gray-800 rounded-lg p-3 text-white placeholder-gray-500"
+                                className="w-full bg-gray-900 rounded-lg p-3 text-white placeholder-gray-500"
                               />
                               <div className="grid grid-cols-2 gap-2 mt-3">
                                 <div>
@@ -257,7 +260,7 @@ export default function Objectives({ onNavigate }) {
                                     value={editDraft.Start_Date}
                                     onChange={e => setEditDraft(d => ({ ...d, Start_Date: e.target.value }))}
                                     style={{ colorScheme: 'dark' }}
-                                    className="w-full bg-gray-800 rounded-lg p-3 text-white min-h-[48px]"
+                                    className="w-full bg-gray-900 rounded-lg p-3 text-white min-h-[48px]"
                                   />
                                 </div>
                                 <div>
@@ -267,7 +270,7 @@ export default function Objectives({ onNavigate }) {
                                     value={editDraft.Due_Date}
                                     onChange={e => setEditDraft(d => ({ ...d, Due_Date: e.target.value }))}
                                     style={{ colorScheme: 'dark' }}
-                                    className="w-full bg-gray-800 rounded-lg p-3 text-white min-h-[48px]"
+                                    className="w-full bg-gray-900 rounded-lg p-3 text-white min-h-[48px]"
                                   />
                                 </div>
                               </div>
@@ -290,8 +293,8 @@ export default function Objectives({ onNavigate }) {
                           )
                         }
                         return (
-                          <div key={o.Objective_ID} className={`bg-gray-900 rounded-lg p-4 border border-gray-600 border-l-4 ${accent(o)}`}>
-                            <p className="font-medium">{o.Text}</p>
+                          <div key={o.Objective_ID} className={`${CARD} ${accent(o)}`}>
+                            <p className="font-semibold text-lg leading-snug">{o.Text}</p>
                             <p className="text-sm text-gray-400 mt-1">
                               {o.Start_Date} &rarr; {o.Due_Date} &middot;{' '}
                               {left < 0
@@ -353,9 +356,9 @@ export default function Objectives({ onNavigate }) {
                       <div className="space-y-3 mt-3">
                         {completed.length === 0 && <p className="text-gray-400 text-sm">Nothing completed yet.</p>}
                         {completed.map(o => (
-                          <div key={o.Objective_ID} className={`bg-gray-900 rounded-lg p-4 border border-gray-600 border-l-4 ${accent(o)}`}>
+                          <div key={o.Objective_ID} className={`${CARD} ${accent(o)}`}>
                             <div className="flex justify-between items-start gap-3">
-                              <p className="font-medium">{o.Text}</p>
+                              <p className="font-semibold text-lg leading-snug">{o.Text}</p>
                               <span className="text-sm text-teal-400 whitespace-nowrap">
                                 {o.Score ? '★ ' + o.Score + '/5' : 'Not rated'}
                               </span>
@@ -370,7 +373,7 @@ export default function Objectives({ onNavigate }) {
                               </button>
                               <button
                                 onClick={() => handleRemove(o)}
-                                className="py-3 rounded-lg bg-gray-800 text-red-400 font-semibold min-h-[48px] active:bg-gray-700"
+                                className="py-3 rounded-lg bg-gray-900 text-red-400 font-semibold min-h-[48px] active:bg-gray-700"
                               >
                                 Remove
                               </button>
