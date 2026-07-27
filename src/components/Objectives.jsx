@@ -33,6 +33,15 @@ function isDone(o) {
   return String(o.Completed) === 'y'
 }
 
+// Left accent bar colour — urgency at a glance.
+function accent(o) {
+  if (isDone(o)) return 'border-l-green-600'
+  const left = daysUntil(o.Due_Date)
+  if (left < 0) return 'border-l-red-500'
+  if (left <= 3) return 'border-l-amber-500'
+  return 'border-l-teal-500'
+}
+
 export default function Objectives({ onNavigate }) {
   const [objectives, setObjectives] = useState([])
   const [loading, setLoading] = useState(true)
@@ -41,6 +50,8 @@ export default function Objectives({ onNavigate }) {
   const [openCompleted, setOpenCompleted] = useState({ short: false, mid: false })
   const [addingTo, setAddingTo] = useState(null)
   const [newText, setNewText] = useState('')
+  const [editingId, setEditingId] = useState(null)
+  const [editDraft, setEditDraft] = useState({ Text: '', Start_Date: '', Due_Date: '' })
   const [busy, setBusy] = useState(false)
   const [toast, setToast] = useState(null)
 
@@ -102,6 +113,24 @@ export default function Objectives({ onNavigate }) {
     const score = Number(o.Score) === n ? '' : n
     const next = objectives.map(x => (x.Objective_ID === o.Objective_ID ? { ...x, Score: score } : x))
     persist(next, () => updateObjective(o.Objective_ID, { Score: score }), 'Failed to save score. Try again.')
+  }
+
+  function startEdit(o) {
+    setEditingId(o.Objective_ID)
+    setEditDraft({ Text: o.Text, Start_Date: String(o.Start_Date), Due_Date: String(o.Due_Date) })
+  }
+
+  function handleSaveEdit(o) {
+    const fields = {
+      Text: editDraft.Text.trim(),
+      Start_Date: editDraft.Start_Date,
+      Due_Date: editDraft.Due_Date,
+    }
+    if (!fields.Text || !fields.Start_Date || !fields.Due_Date) return
+    setEditingId(null)
+    const next = objectives.map(x => (x.Objective_ID === o.Objective_ID ? { ...x, ...fields } : x))
+    showToast('Objective updated')
+    persist(next, () => updateObjective(o.Objective_ID, fields), 'Failed to save changes. Try again.')
   }
 
   function handleFinish(o) {
@@ -210,8 +239,58 @@ export default function Objectives({ onNavigate }) {
                     <div className="space-y-3">
                       {active.map(o => {
                         const left = daysUntil(o.Due_Date)
+                        if (editingId === o.Objective_ID) {
+                          return (
+                            <div key={o.Objective_ID} className={`bg-gray-900 rounded-lg p-4 border border-gray-600 border-l-4 ${accent(o)}`}>
+                              <input
+                                type="text"
+                                value={editDraft.Text}
+                                onChange={e => setEditDraft(d => ({ ...d, Text: e.target.value }))}
+                                autoFocus
+                                className="w-full bg-gray-800 rounded-lg p-3 text-white placeholder-gray-500"
+                              />
+                              <div className="grid grid-cols-2 gap-2 mt-3">
+                                <div>
+                                  <p className="text-xs text-gray-500 mb-1">Start</p>
+                                  <input
+                                    type="date"
+                                    value={editDraft.Start_Date}
+                                    onChange={e => setEditDraft(d => ({ ...d, Start_Date: e.target.value }))}
+                                    style={{ colorScheme: 'dark' }}
+                                    className="w-full bg-gray-800 rounded-lg p-3 text-white min-h-[48px]"
+                                  />
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-500 mb-1">Due</p>
+                                  <input
+                                    type="date"
+                                    value={editDraft.Due_Date}
+                                    onChange={e => setEditDraft(d => ({ ...d, Due_Date: e.target.value }))}
+                                    style={{ colorScheme: 'dark' }}
+                                    className="w-full bg-gray-800 rounded-lg p-3 text-white min-h-[48px]"
+                                  />
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-2 gap-2 mt-3">
+                                <button
+                                  onClick={() => setEditingId(null)}
+                                  className="py-3 rounded-lg bg-gray-600 text-gray-200 font-semibold min-h-[48px]"
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  onClick={() => handleSaveEdit(o)}
+                                  disabled={!editDraft.Text.trim() || !editDraft.Start_Date || !editDraft.Due_Date}
+                                  className="py-3 rounded-lg bg-teal-600 text-white font-semibold min-h-[48px] active:bg-teal-700 disabled:opacity-50"
+                                >
+                                  Save
+                                </button>
+                              </div>
+                            </div>
+                          )
+                        }
                         return (
-                          <div key={o.Objective_ID} className="bg-gray-900 rounded-lg p-4">
+                          <div key={o.Objective_ID} className={`bg-gray-900 rounded-lg p-4 border border-gray-600 border-l-4 ${accent(o)}`}>
                             <p className="font-medium">{o.Text}</p>
                             <p className="text-sm text-gray-400 mt-1">
                               {o.Start_Date} &rarr; {o.Due_Date} &middot;{' '}
@@ -241,12 +320,20 @@ export default function Objectives({ onNavigate }) {
                             >
                               Mark finished
                             </button>
-                            <button
-                              onClick={() => handleRemove(o)}
-                              className="w-full mt-2 text-red-400 py-2 min-h-[44px] text-sm font-semibold"
-                            >
-                              Remove
-                            </button>
+                            <div className="grid grid-cols-2 gap-2 mt-2">
+                              <button
+                                onClick={() => startEdit(o)}
+                                className="text-gray-300 py-2 min-h-[44px] text-sm font-semibold"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => handleRemove(o)}
+                                className="text-red-400 py-2 min-h-[44px] text-sm font-semibold"
+                              >
+                                Remove
+                              </button>
+                            </div>
                           </div>
                         )
                       })}
@@ -266,7 +353,7 @@ export default function Objectives({ onNavigate }) {
                       <div className="space-y-3 mt-3">
                         {completed.length === 0 && <p className="text-gray-400 text-sm">Nothing completed yet.</p>}
                         {completed.map(o => (
-                          <div key={o.Objective_ID} className="bg-gray-900 rounded-lg p-4">
+                          <div key={o.Objective_ID} className={`bg-gray-900 rounded-lg p-4 border border-gray-600 border-l-4 ${accent(o)}`}>
                             <div className="flex justify-between items-start gap-3">
                               <p className="font-medium">{o.Text}</p>
                               <span className="text-sm text-teal-400 whitespace-nowrap">
