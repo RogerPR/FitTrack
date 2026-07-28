@@ -43,6 +43,8 @@ function doPost(e) {
       case 'addObjectiveSteps':    return respond(handleAddObjectiveSteps(body));
       case 'updateObjectiveStep':  return respond(handleUpdateObjectiveStep(body));
       case 'deleteObjectiveStep':  return respond(handleDeleteObjectiveStep(body));
+      case 'getProfile':           return respond(handleGetProfile());
+      case 'saveProfile':          return respond(handleSaveProfile(body));
       case 'objectivesChat':       return respond(handleObjectivesChat(body));
       case 'suggestSteps':         return respond(handleSuggestSteps(body));
       default: return respond({ success: false, error: 'Unknown action: ' + body.action });
@@ -166,7 +168,8 @@ function setup() {
     'Goals':           ['Calories', 'Protein', 'Carbs', 'Fat'],
     'Body Log':        ['Date', 'Weight_kg', 'Fat_pct'],
     'Objectives':      ['Objective_ID', 'Term', 'Text', 'Start_Date', 'Due_Date', 'Completed', 'Score'],
-    'Objective Steps': ['Step_ID', 'Objective_ID', 'Step_Num', 'Text', 'Done']
+    'Objective Steps': ['Step_ID', 'Objective_ID', 'Step_Num', 'Text', 'Done'],
+    'Profile':         ['Text']
   };
 
   var names = Object.keys(tabs);
@@ -298,6 +301,7 @@ function handleGetObjectivesBundle() {
   return { success: true, data: {
     objectives: handleGetObjectives().data,
     steps: steps.data,
+    profile: readProfile(),
   } };
 }
 
@@ -705,6 +709,31 @@ function handleDeleteObjectiveStep(body) {
   return { success: true, data: null };
 }
 
+// --- Profile ---
+
+var PROFILE_MAX = 2000;
+
+// Tolerates a missing tab rather than throwing, so the coach still works if
+// setup() has not been re-run yet.
+function readProfile() {
+  var sheet = getSheet('Profile');
+  if (!sheet) return '';
+  var data = sheet.getDataRange().getValues();
+  if (data.length < 2) return '';
+  return String(data[1][0] || '').trim();
+}
+
+function handleGetProfile() {
+  return { success: true, data: readProfile() };
+}
+
+function handleSaveProfile(body) {
+  var sheet = getSheet('Profile');
+  if (!sheet) return { success: false, error: 'Profile tab is missing - run setup() in the Apps Script editor' };
+  sheet.getRange(2, 1).setValue(String(body.text || '').trim().substring(0, PROFILE_MAX));
+  return { success: true, data: null };
+}
+
 // --- Objectives AI ---
 
 var CLAUDE_MODELS = { sonnet: 'claude-sonnet-5', opus: 'claude-opus-5' };
@@ -802,7 +831,17 @@ function buildObjectivesContext() {
     { id: 'long',  label: 'Long term (no deadline)' }
   ];
 
-  var out = ['# My objectives (today is ' + today + ')'];
+  var out = [];
+
+  // The user's own description of themselves, edited from the objectives screen.
+  var profile = readProfile();
+  if (profile) {
+    out.push('# About me');
+    out.push(profile);
+    out.push('');
+  }
+
+  out.push('# My objectives (today is ' + today + ')');
 
   for (var t = 0; t < terms.length; t++) {
     var lines = [];
@@ -1058,6 +1097,7 @@ function handleObjectivesChat(body) {
     '- Long term objectives have no deadline on purpose. Treat them as direction, not something to chase a date on.',
     '- Use metric units.',
     '- When talking to the user, refer to objectives by their text, never by their ID.',
+    '- The "About me" note, when there is one, is written by the user. Use it to tailor your advice rather than repeating it back at them.',
     '',
     'Changing the list:',
     '- You have tools that edit the objectives. They are the exception, not the point - most turns are just conversation.',
@@ -1065,7 +1105,7 @@ function handleObjectivesChat(body) {
     '- Nothing you propose is saved until the user confirms it on their phone. Propose it and stop. Do not say a change is done.',
     '- Suggesting ideas, drafting wording, or talking an objective through needs no tool at all.',
     '',
-    'The user\'s current objectives and steps:',
+    'What the user has told you about themselves, and their current objectives and steps:',
     '',
     buildObjectivesContext()
   ].join('\n');
@@ -1106,6 +1146,7 @@ function handleSuggestSteps(body) {
   var system = [
     'You break personal objectives down into concrete, actionable steps.',
     'You can see all of the user\'s objectives, so avoid proposing steps that duplicate another objective or pull against a long term one.',
+    'If there is an "About me" note, fit the steps to that person\'s circumstances.',
     'Use metric units.',
     '',
     buildObjectivesContext()

@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import {
   getObjectivesBundle, addObjective, updateObjective, deleteObjective,
-  addObjectiveSteps, updateObjectiveStep, deleteObjectiveStep, suggestSteps,
+  addObjectiveSteps, updateObjectiveStep, deleteObjectiveStep, suggestSteps, saveProfile,
 } from '../api/sheets'
 import ObjectivesChat from './ObjectivesChat'
 
@@ -10,6 +10,9 @@ const TERMS = [
   { id: 'mid', label: 'Mid term', sub: '3 months' },
   { id: 'long', label: 'Long term', sub: 'no deadline' },
 ]
+
+// Matches PROFILE_MAX in Code.gs, which truncates on save.
+const PROFILE_MAX = 2000
 
 // Local date formatting — the app-wide toISOString() idiom shifts a day in UTC+2 late at night,
 // which would produce wrong due dates.
@@ -83,6 +86,13 @@ export default function Objectives({ onNavigate }) {
   const [steerText, setSteerText] = useState('')
   const [chatOpen, setChatOpen] = useState(false)
 
+  // Free text about the user, sent to the AI as context. Held here so the chat
+  // and the suggest-steps flow both pick up an edit without a reload.
+  const [profile, setProfile] = useState('')
+  const [profileOpen, setProfileOpen] = useState(false)
+  const [profileDraft, setProfileDraft] = useState('')
+  const [savingProfile, setSavingProfile] = useState(false)
+
   function showToast(msg) {
     setToast(msg)
     setTimeout(() => setToast(null), 2500)
@@ -91,9 +101,10 @@ export default function Objectives({ onNavigate }) {
   // Also called after the coach writes something, so the list reflects the Sheet.
   function loadAll() {
     return getObjectivesBundle()
-      .then(({ objectives: objectiveRows, steps: stepRows }) => {
+      .then(({ objectives: objectiveRows, steps: stepRows, profile: profileText }) => {
         setObjectives(objectiveRows || [])
         setSteps(stepRows || [])
+        setProfile(profileText || '')
         setError(null)
       })
       .catch(err => setError(err.message))
@@ -306,6 +317,27 @@ export default function Objectives({ onNavigate }) {
     persistSteps([...steps, ...rows], () => addObjectiveSteps(rows), 'Failed to add steps. Try again.')
   }
 
+  function openProfile() {
+    setProfileDraft(profile)
+    setProfileOpen(true)
+  }
+
+  // Not optimistic: this is one field the AI reads, so it is worth knowing it landed.
+  async function handleSaveProfile() {
+    const text = profileDraft.trim().slice(0, PROFILE_MAX)
+    setSavingProfile(true)
+    try {
+      await saveProfile(text)
+      setProfile(text)
+      setProfileOpen(false)
+      showToast('Saved')
+    } catch (err) {
+      showToast(err.message)
+    } finally {
+      setSavingProfile(false)
+    }
+  }
+
   if (chatOpen) return <ObjectivesChat onClose={() => setChatOpen(false)} onChanged={loadAll} />
 
   return (
@@ -317,6 +349,16 @@ export default function Objectives({ onNavigate }) {
           </svg>
         </button>
         <h1 className="text-2xl font-bold flex-1">Objectives</h1>
+        <button
+          onClick={openProfile}
+          aria-label="About me"
+          className={`min-w-[48px] min-h-[48px] flex items-center justify-center ${profile ? 'text-purple-400' : 'text-gray-500'}`}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+            <circle cx="12" cy="7" r="4"/>
+          </svg>
+        </button>
         <button
           onClick={() => setChatOpen(true)}
           aria-label="Chat about my objectives"
@@ -734,6 +776,41 @@ export default function Objectives({ onNavigate }) {
               </div>
             )
           })}
+        </div>
+      )}
+
+      {profileOpen && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-800 rounded-lg p-6 w-full max-w-sm">
+            <h3 className="text-lg font-bold mb-1">About me</h3>
+            <p className="text-sm text-gray-400 mb-4">
+              Anything the coach should know about you &mdash; your situation, what you are working
+              towards, what does and does not work for you.
+            </p>
+            <textarea
+              value={profileDraft}
+              onChange={e => setProfileDraft(e.target.value.slice(0, PROFILE_MAX))}
+              rows={8}
+              placeholder="I am 34, work as a developer, training four times a week..."
+              className="w-full bg-gray-700 rounded-lg p-3 text-white placeholder-gray-500 resize-none"
+            />
+            <p className="text-xs text-gray-500 mt-1 mb-4">{profileDraft.length}/{PROFILE_MAX}</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setProfileOpen(false)}
+                className="flex-1 py-3 rounded-lg bg-gray-700 text-gray-300 min-h-[48px]"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveProfile}
+                disabled={savingProfile}
+                className="flex-1 py-3 rounded-lg bg-purple-600 text-white font-semibold min-h-[48px] active:bg-purple-700 disabled:opacity-50"
+              >
+                {savingProfile ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

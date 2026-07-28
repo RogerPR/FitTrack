@@ -93,6 +93,15 @@ One row per step. Identity is `Step_ID` (client-minted, `step_<timestamp>_<i>`) 
 display order only, so appending never renumbers existing rows. `Done` is `y` or empty, same
 boolean-coercion reason as `Completed`. Deleting an objective cascades to its steps server-side.
 
+### Tab: "Profile"
+| Text |
+|------|
+
+A single cell (`A2`) holding the user's free-text description of themselves, capped at 2000 chars.
+Edited from the "About me" popup on the Objectives screen and prepended to `buildObjectivesContext()`
+as an `# About me` block, so both objectives AI features see it. Reads tolerate a missing tab and
+return `''`, so the coach keeps working before `setup()` is re-run.
+
 ## Frontend Screens
 
 ### 1. Dashboard (home screen)
@@ -147,7 +156,7 @@ Reads whose results are always needed together are batched into a single action,
 serializes executions per user and every extra round trip is another chance to hit the redirect 404
 (see Known Gotchas):
 - `getDashboard(date)` → `{ meals, workout, goals }` — what the Dashboard needs in one call
-- `getObjectivesBundle` → `{ objectives, steps }`
+- `getObjectivesBundle` → `{ objectives, steps, profile }`
 
 The underlying single-purpose actions are still exposed and still work.
 
@@ -177,6 +186,7 @@ Endpoints (actions):
   calls one returns `actions` (proposals) and writes nothing. Sending the same `messages` back with
   `decisions` (a map of tool_use id → true/false) runs the approved ones and continues the turn.
 - `suggestSteps(objectiveId, model)` → generates 2-10 steps for one objective → `{ steps: [...] }`
+- `getProfile` / `saveProfile(text)` → the user's free-text "About me" note
 - `getGoals` / `saveGoals(goals)` → macro targets
 - `getBodyLog` / `logBody(entry)` / `deleteBodyLog(date, weight, fat)` → weight and body-fat log
 - `getMealUsageCounts` → how often each saved meal has been logged
@@ -198,9 +208,9 @@ npm) and no key ever reaches the frontend.
 | `objectivesChat`, `suggestSteps` | `claude-sonnet-5` default, `claude-opus-5` via toggle | Model choice persists in `localStorage['fittrack_ai_model']` |
 
 Objectives AI notes:
-- `buildObjectivesContext()` in `Code.gs` renders every objective, its dates, and its steps into one
-  text block shared by both features. It goes in the `system` parameter. **The frontend never sends
-  the objectives** — the backend reads the Sheet directly.
+- `buildObjectivesContext()` in `Code.gs` renders the Profile note, then every objective, its dates,
+  and its steps into one text block shared by both features. It goes in the `system` parameter.
+  **The frontend never sends the objectives or the profile** — the backend reads the Sheet directly.
 - Overdue days are precomputed server-side rather than left for the model to derive from dates.
 - Keep adaptive thinking on and control cost with `output_config.effort` (`low` for chat, `medium`
   for steps). Explicitly disabling thinking on Opus 5 leaks `<thinking>` tags into the reply, and is
@@ -232,7 +242,7 @@ Objectives AI notes:
 - `src/components/Dashboard.jsx` — Daily summary, macro totals, meal/workout lists, refresh button
 - `src/components/LogMeal.jsx` — Saved meals list, "Log to Today", Create Meal flow
 - `src/components/LogWorkout.jsx` — Saved routines, Create Routine, Log Workout Session with pre-fill
-- `src/components/Objectives.jsx` — Objectives sub-app: short/mid/long term collapsible sections, add/score/finish/re-add/remove, per-objective steps
+- `src/components/Objectives.jsx` — Objectives sub-app: short/mid/long term collapsible sections, add/score/finish/re-add/remove, per-objective steps, "About me" profile popup
 - `src/components/ObjectivesChat.jsx` — Goal-coach chat with starter prompts, a Sonnet/Opus toggle, and the confirm-before-write card for proposed objective edits
 - `src/api/sheets.js` — All API functions (POST to Apps Script)
 - `src/config.js` — API_URL (gitignored, generated in CI from secret)
