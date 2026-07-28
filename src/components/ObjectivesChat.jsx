@@ -11,42 +11,81 @@ const STARTERS = [
   { label: 'Think long term', prompt: 'Help me think about my long term objectives. Are they still the right direction, and is my short and mid term work actually feeding them?' },
 ]
 
-export default function ObjectivesChat({ onClose }) {
+// Assistant turns are stored as the raw content blocks the API returned
+// (thinking, text, tool_use) so they can be replayed verbatim on the next turn.
+// Only the text is worth rendering; tool_result turns render as nothing.
+function textOf(content) {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  return content.filter(b => b.type === 'text').map(b => b.text).join('')
+}
+
+export default function ObjectivesChat({ onClose, onChanged }) {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [pending, setPending] = useState(false)
   const [error, setError] = useState(null)
+  const [failedWrite, setFailedWrite] = useState(false)
+  const [actions, setActions] = useState([])
   const [model, setModel] = useState(() => localStorage.getItem('fittrack_ai_model') || 'sonnet')
   const [starter, setStarter] = useState(null)
   const bottomRef = useRef(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, pending])
+  }, [messages, pending, actions])
 
   function pickModel(next) {
     setModel(next)
     localStorage.setItem('fittrack_ai_model', next)
   }
 
-  async function send(history) {
-    setMessages(history)
+  function reset() {
+    setMessages([])
+    setActions([])
     setError(null)
+    setFailedWrite(false)
+    setStarter(null)
+  }
+
+  // `decisions` maps tool_use ids to true/false. Present only on a confirm turn,
+  // which is the only turn that can write anything.
+  async function send(history, decisions) {
+    setMessages(history)
+    setActions([])
+    setError(null)
+    setFailedWrite(false)
     setPending(true)
     try {
-      const data = await objectivesChat(history, model)
-      setMessages([...history, { role: 'assistant', content: data.reply }])
+      const data = await objectivesChat(history, model, decisions)
+      const next = [...history]
+      if (data.toolResults) next.push({ role: 'user', content: data.toolResults })
+      next.push({ role: 'assistant', content: data.content })
+      setMessages(next)
+      setActions(data.actions || [])
+      if (decisions) onChanged?.()
     } catch (err) {
       setError(err.message)
+      // A write may or may not have landed before the failure, so resending is
+      // not safe and the objectives list can no longer be trusted.
+      setFailedWrite(!!decisions)
+      if (decisions) onChanged?.()
     } finally {
       setPending(false)
     }
   }
 
+  function decide(approve) {
+    if (pending || !actions.length) return
+    const decisions = {}
+    for (const a of actions) decisions[a.id] = approve
+    send(messages, decisions)
+  }
+
   // A picked starter can be sent bare, or with whatever the user typed appended
   // to it — so the fast path stays one tap and steering costs nothing extra.
   function handleSend() {
-    if (pending) return
+    if (pending || actions.length) return
     const text = input.trim()
     if (!text && !starter) return
     const content = starter
@@ -76,7 +115,7 @@ export default function ObjectivesChat({ onClose }) {
         <h1 className="text-2xl font-bold flex-1">Coach</h1>
         {messages.length > 0 && (
           <button
-            onClick={() => { setMessages([]); setError(null); setStarter(null) }}
+            onClick={reset}
             className="text-gray-400 text-sm font-semibold px-3 min-h-[44px]"
           >
             Clear
@@ -118,16 +157,20 @@ export default function ObjectivesChat({ onClose }) {
           </>
         )}
 
-        {messages.map((m, i) => (
-          <div
-            key={i}
-            className={m.role === 'user'
-              ? 'bg-teal-700 rounded-xl p-3 ml-8'
-              : 'bg-gray-800 rounded-xl p-3 mr-8 border border-gray-700'}
-          >
-            <p className="whitespace-pre-wrap leading-relaxed">{m.content}</p>
-          </div>
-        ))}
+        {messages.map((m, i) => {
+          const text = textOf(m.content)
+          if (!text) return null
+          return (
+            <div
+              key={i}
+              className={m.role === 'user'
+                ? 'bg-teal-700 rounded-xl p-3 ml-8'
+                : 'bg-gray-800 rounded-xl p-3 mr-8 border border-gray-700'}
+            >
+              <p className="whitespace-pre-wrap leading-relaxed">{text}</p>
+            </div>
+          )
+        })}
 
         {pending && (
           <div className="bg-gray-800 rounded-xl p-3 mr-8 border border-gray-700">
@@ -135,15 +178,54 @@ export default function ObjectivesChat({ onClose }) {
           </div>
         )}
 
+        {actions.length > 0 && !pending && (
+          <div className="bg-gray-800 rounded-xl p-3 mr-8 border border-purple-500">
+            <p className="text-purple-300 text-sm font-semibold mb-2">Change your objectives?</p>
+            <ul className="mb-3 space-y-1">
+              {actions.map(a => (
+                <li key={a.id} className="text-sm leading-relaxed">&bull; {a.label}</li>
+              ))}
+            </ul>
+            <div className="flex gap-2">
+              <button
+                onClick={() => decide(true)}
+                className="flex-1 bg-purple-600 text-white px-4 rounded-lg font-semibold min-h-[48px] active:bg-purple-700"
+              >
+                Do it
+              </button>
+              <button
+                onClick={() => decide(false)}
+                className="flex-1 bg-gray-700 text-white px-4 rounded-lg font-semibold min-h-[48px] active:bg-gray-600"
+              >
+                Skip
+              </button>
+            </div>
+          </div>
+        )}
+
         {error && (
           <div className="bg-gray-900 rounded-xl p-3 mr-8 border border-red-500">
             <p className="text-red-400 text-sm mb-2">{error}</p>
-            <button
-              onClick={handleRetry}
-              className="bg-gray-700 text-white px-4 py-2 rounded-lg font-semibold min-h-[44px]"
-            >
-              Retry
-            </button>
+            {failedWrite ? (
+              <>
+                <p className="text-gray-400 text-sm mb-2">
+                  Your objectives may or may not have changed. Check the list before trying again.
+                </p>
+                <button
+                  onClick={reset}
+                  className="bg-gray-700 text-white px-4 py-2 rounded-lg font-semibold min-h-[44px]"
+                >
+                  Start over
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={handleRetry}
+                className="bg-gray-700 text-white px-4 py-2 rounded-lg font-semibold min-h-[44px]"
+              >
+                Retry
+              </button>
+            )}
           </div>
         )}
 
@@ -169,12 +251,17 @@ export default function ObjectivesChat({ onClose }) {
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleSend()}
-            placeholder={starter ? 'Add anything specific? Optional' : 'Ask anything...'}
-            className="flex-1 bg-gray-800 rounded-lg p-3 text-white placeholder-gray-500 min-h-[48px]"
+            disabled={actions.length > 0}
+            placeholder={
+              actions.length ? 'Answer the question above first'
+                : starter ? 'Add anything specific? Optional'
+                : 'Ask anything...'
+            }
+            className="flex-1 bg-gray-800 rounded-lg p-3 text-white placeholder-gray-500 min-h-[48px] disabled:opacity-50"
           />
           <button
             onClick={handleSend}
-            disabled={(!input.trim() && !starter) || pending}
+            disabled={(!input.trim() && !starter) || pending || actions.length > 0}
             className="bg-purple-600 text-white px-5 rounded-lg font-semibold min-h-[48px] active:bg-purple-700 disabled:opacity-50"
           >
             Send

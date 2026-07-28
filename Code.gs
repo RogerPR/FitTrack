@@ -709,7 +709,7 @@ function handleDeleteObjectiveStep(body) {
 
 var CLAUDE_MODELS = { sonnet: 'claude-sonnet-5', opus: 'claude-opus-5' };
 
-function callClaude(modelKey, system, messages, maxTokens, effort) {
+function callClaude(modelKey, system, messages, maxTokens, effort, tools) {
   var payload = {
     model: CLAUDE_MODELS[modelKey] || CLAUDE_MODELS.sonnet,
     max_tokens: maxTokens,
@@ -718,6 +718,7 @@ function callClaude(modelKey, system, messages, maxTokens, effort) {
     thinking: { type: 'adaptive' },
     output_config: { effort: effort }
   };
+  if (tools && tools.length) payload.tools = tools;
 
   var res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
     method: 'post',
@@ -742,12 +743,17 @@ function callClaude(modelKey, system, messages, maxTokens, effort) {
   // Adaptive thinking puts thinking blocks in content alongside the text, so
   // content[0] is not reliably the answer - collect the text blocks instead.
   var text = '';
+  var hasToolUse = false;
   for (var i = 0; i < result.content.length; i++) {
     if (result.content[i].type === 'text') text += result.content[i].text;
+    if (result.content[i].type === 'tool_use') hasToolUse = true;
   }
-  if (!text) return { ok: false, error: 'Empty response from Claude' };
+  // A turn that only calls a tool has no text, and that is fine.
+  if (!text && !hasToolUse) return { ok: false, error: 'Empty response from Claude' };
 
-  return { ok: true, text: text };
+  // content goes back to the client untouched so it can be replayed verbatim -
+  // thinking blocks carry signatures the API rejects if they are edited.
+  return { ok: true, text: text, content: result.content };
 }
 
 function todayStr() {
@@ -827,30 +833,261 @@ function buildObjectivesContext() {
   return out.join('\n');
 }
 
+// The coach can propose these. Nothing here runs until the phone sends back an
+// approval, so the tool list is deliberately small and each one is reversible
+// from the objectives screen - except delete, which says so in its description.
+var OBJECTIVE_TOOLS = [
+  {
+    name: 'add_objective',
+    description: 'Create a new objective. The due date follows from the term automatically, so never ask the user for one.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: 'The objective in the user\'s own words, under 100 characters.' },
+        term: { type: 'string', enum: ['short', 'mid', 'long'], description: 'short = 2 weeks, mid = 3 months, long = no deadline.' }
+      },
+      required: ['text', 'term']
+    }
+  },
+  {
+    name: 'add_steps',
+    description: 'Append steps to an existing objective. Steps it already has are kept.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        objective_id: { type: 'string', description: 'The bracketed id from the objectives list.' },
+        steps: { type: 'array', items: { type: 'string' }, description: '1 to 10 steps, each one concrete action under 12 words.' }
+      },
+      required: ['objective_id', 'steps']
+    }
+  },
+  {
+    name: 'update_objective',
+    description: 'Change an existing objective. Include only the fields that should change.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        objective_id: { type: 'string', description: 'The bracketed id from the objectives list.' },
+        text: { type: 'string', description: 'New wording for the objective.' },
+        due_date: { type: 'string', description: 'YYYY-MM-DD. Leave out for long term objectives, which have no deadline.' },
+        completed: { type: 'boolean', description: 'True marks it finished, false reopens it.' },
+        score: { type: 'integer', description: 'How it went, 1 to 5.' }
+      },
+      required: ['objective_id']
+    }
+  },
+  {
+    name: 'delete_objective',
+    description: 'Permanently remove an objective and all its steps. There is no undo. Only when the user asks to delete it.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        objective_id: { type: 'string', description: 'The bracketed id from the objectives list.' }
+      },
+      required: ['objective_id']
+    }
+  }
+];
+
+// Mirrors dueDate() in Objectives.jsx so a coach-created objective looks exactly
+// like a hand-created one.
+function dueDateFor(term) {
+  if (term === 'long') return '';
+  var d = new Date();
+  if (term === 'short') d.setDate(d.getDate() + 14);
+  else d.setMonth(d.getMonth() + 3);
+  return Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+}
+
+function findObjective(id) {
+  var objectives = getSheetData('Objectives');
+  for (var i = 0; i < objectives.length; i++) {
+    if (String(objectives[i].Objective_ID) === String(id)) return objectives[i];
+  }
+  return null;
+}
+
+// Returns a short outcome string, which becomes the tool_result Claude reads.
+function runObjectiveTool(name, input) {
+  input = input || {};
+
+  if (name === 'add_objective') {
+    var term = String(input.term || '');
+    if (term !== 'short' && term !== 'mid' && term !== 'long') return 'Failed: term must be short, mid or long.';
+    var text = String(input.text || '').trim();
+    if (!text) return 'Failed: no text given.';
+    appendRows('Objectives', [{
+      Objective_ID: 'obj_' + Date.now(),
+      Term: term,
+      Text: text,
+      Start_Date: todayStr(),
+      Due_Date: dueDateFor(term),
+      Completed: '',
+      Score: ''
+    }]);
+    return 'Added.';
+  }
+
+  if (name === 'add_steps') {
+    var target = findObjective(input.objective_id);
+    if (!target) return 'Failed: no objective with that id.';
+
+    // Step_Num is display order only, so carry on from the highest one already there.
+    var existing = getSheet('Objective Steps') ? getSheetData('Objective Steps') : [];
+    var next = 1;
+    for (var e = 0; e < existing.length; e++) {
+      if (String(existing[e].Objective_ID) !== String(target.Objective_ID)) continue;
+      next = Math.max(next, (Number(existing[e].Step_Num) || 0) + 1);
+    }
+
+    var texts = input.steps || [];
+    var rows = [];
+    var stamp = Date.now();
+    for (var i = 0; i < texts.length && rows.length < 10; i++) {
+      var t = String(texts[i]).trim();
+      if (!t) continue;
+      rows.push({
+        Step_ID: 'step_' + stamp + '_' + i,
+        Objective_ID: target.Objective_ID,
+        Step_Num: next + rows.length,
+        Text: t,
+        Done: ''
+      });
+    }
+    if (!rows.length) return 'Failed: no steps given.';
+    appendRows('Objective Steps', rows);
+    return 'Added ' + rows.length + ' step' + (rows.length === 1 ? '.' : 's.');
+  }
+
+  if (name === 'update_objective') {
+    var obj = findObjective(input.objective_id);
+    if (!obj) return 'Failed: no objective with that id.';
+
+    var fields = {};
+    if (input.text !== undefined && String(input.text).trim()) fields.Text = String(input.text).trim();
+    if (input.due_date !== undefined) fields.Due_Date = String(obj.Term) === 'long' ? '' : String(input.due_date);
+    if (input.completed !== undefined) fields.Completed = input.completed ? 'y' : '';
+    if (input.score !== undefined) {
+      var n = Math.round(Number(input.score));
+      if (n >= 1 && n <= 5) fields.Score = n;
+    }
+    if (!Object.keys(fields).length) return 'Failed: nothing to change.';
+
+    updateRowById('Objectives', 'Objective_ID', obj.Objective_ID, fields);
+    return 'Updated.';
+  }
+
+  if (name === 'delete_objective') {
+    var doomed = findObjective(input.objective_id);
+    if (!doomed) return 'Failed: no objective with that id.';
+    deleteRowsWhere('Objectives', 'Objective_ID', doomed.Objective_ID);
+    deleteRowsWhere('Objective Steps', 'Objective_ID', doomed.Objective_ID);
+    return 'Deleted.';
+  }
+
+  return 'Failed: unknown tool ' + name;
+}
+
+// One line per proposed change, for the confirmation card on the phone. Built
+// here rather than on the client so there is one copy of the wording.
+function describeAction(name, input, byId) {
+  input = input || {};
+  var target = byId[String(input.objective_id)];
+  var label = target ? '"' + target.Text + '"' : 'that objective';
+
+  if (name === 'add_objective') {
+    var terms = { short: 'short term', mid: 'mid term', long: 'long term' };
+    return 'Add ' + (terms[input.term] || '') + ' objective: "' + input.text + '"';
+  }
+
+  if (name === 'add_steps') {
+    var n = (input.steps || []).length;
+    return 'Add ' + n + (n === 1 ? ' step to ' : ' steps to ') + label;
+  }
+
+  if (name === 'update_objective') {
+    var bits = [];
+    if (input.text !== undefined) bits.push('reword to "' + input.text + '"');
+    if (input.due_date !== undefined) bits.push('due ' + input.due_date);
+    if (input.completed !== undefined) bits.push(input.completed ? 'mark finished' : 'reopen');
+    if (input.score !== undefined) bits.push('score ' + input.score + '/5');
+    return 'Update ' + label + ': ' + (bits.join(', ') || 'no change');
+  }
+
+  if (name === 'delete_objective') return 'Delete ' + label + ' and its steps';
+
+  return name;
+}
+
 function handleObjectivesChat(body) {
   var messages = body.messages || [];
   if (!messages.length) return { success: false, error: 'No messages provided' };
 
+  // A confirmed turn. Run whatever the user approved, then hand every outcome
+  // back to Claude as a single tool_result turn - the API needs one result per
+  // tool_use block, approved or not.
+  var toolResults = null;
+  if (body.decisions) {
+    var last = messages[messages.length - 1];
+    if (!last || last.role !== 'assistant' || !last.content || !last.content.length) {
+      return { success: false, error: 'Nothing to confirm' };
+    }
+
+    toolResults = [];
+    for (var i = 0; i < last.content.length; i++) {
+      var block = last.content[i];
+      if (block.type !== 'tool_use') continue;
+      var outcome = body.decisions[block.id] === true
+        ? runObjectiveTool(block.name, block.input)
+        : 'The user declined this change.';
+      toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: outcome });
+    }
+    if (!toolResults.length) return { success: false, error: 'Nothing to confirm' };
+
+    messages = messages.concat([{ role: 'user', content: toolResults }]);
+  }
+
+  // Built after the tools have run, so the context reflects the writes.
   var system = [
-    'You are a personal goal coach inside FitTrack, a fitness and nutrition tracker used by one person on their phone.',
+    'You are a personal goal coach. You help one person think through the objectives they set for themselves - work, health, learning, relationships, anything they are trying to get better at.',
     '',
     'How to respond:',
     '- Be brief. A few short sentences, or one short paragraph. No headings, no long bullet lists.',
     '- Be concrete. A specific next action beats general encouragement.',
     '- Be honest about overdue objectives rather than glossing over them.',
     '- Long term objectives have no deadline on purpose. Treat them as direction, not something to chase a date on.',
-    '- Use metric units: kilograms and grams.',
-    '- Refer to objectives by their text, never by their ID.',
+    '- Use metric units.',
+    '- When talking to the user, refer to objectives by their text, never by their ID.',
+    '',
+    'Changing the list:',
+    '- You have tools that edit the objectives. They are the exception, not the point - most turns are just conversation.',
+    '- Only call a tool when the user has clearly asked for that change. Never call one to act on an idea of your own they have not agreed to.',
+    '- Nothing you propose is saved until the user confirms it on their phone. Propose it and stop. Do not say a change is done.',
+    '- Suggesting ideas, drafting wording, or talking an objective through needs no tool at all.',
     '',
     'The user\'s current objectives and steps:',
     '',
     buildObjectivesContext()
   ].join('\n');
 
-  var res = callClaude(body.model, system, messages, 2048, 'low');
+  var res = callClaude(body.model, system, messages, 2048, 'low', OBJECTIVE_TOOLS);
   if (!res.ok) return { success: false, error: res.error };
 
-  return { success: true, data: { reply: res.text } };
+  var objectives = getSheetData('Objectives');
+  var byId = {};
+  for (var o = 0; o < objectives.length; o++) byId[String(objectives[o].Objective_ID)] = objectives[o];
+
+  var actions = [];
+  for (var c = 0; c < res.content.length; c++) {
+    var b = res.content[c];
+    if (b.type !== 'tool_use') continue;
+    actions.push({ id: b.id, name: b.name, label: describeAction(b.name, b.input, byId) });
+  }
+
+  return {
+    success: true,
+    data: { reply: res.text, content: res.content, actions: actions, toolResults: toolResults }
+  };
 }
 
 function handleSuggestSteps(body) {
@@ -869,7 +1106,7 @@ function handleSuggestSteps(body) {
   var system = [
     'You break personal objectives down into concrete, actionable steps.',
     'You can see all of the user\'s objectives, so avoid proposing steps that duplicate another objective or pull against a long term one.',
-    'Use metric units: kilograms and grams.',
+    'Use metric units.',
     '',
     buildObjectivesContext()
   ].join('\n');

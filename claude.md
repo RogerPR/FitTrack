@@ -172,7 +172,10 @@ Endpoints (actions):
 - `addObjectiveSteps(steps)` → appends step rows
 - `updateObjectiveStep(id, fields)` → sets the given columns on the matching Step_ID row
 - `deleteObjectiveStep(id)` → removes the step row
-- `objectivesChat(messages, model)` → multi-turn chat over the objectives context → `{ reply }`
+- `objectivesChat(messages, model, decisions?)` → multi-turn chat over the objectives context →
+  `{ reply, content, actions, toolResults }`. The coach has tools that edit objectives; a turn that
+  calls one returns `actions` (proposals) and writes nothing. Sending the same `messages` back with
+  `decisions` (a map of tool_use id → true/false) runs the approved ones and continues the turn.
 - `suggestSteps(objectiveId, model)` → generates 2-10 steps for one objective → `{ steps: [...] }`
 - `getGoals` / `saveGoals(goals)` → macro targets
 - `getBodyLog` / `logBody(entry)` / `deleteBodyLog(date, weight, fat)` → weight and body-fat log
@@ -204,6 +207,16 @@ Objectives AI notes:
   a 400 at `xhigh`/`max` effort.
 - With adaptive thinking on, `content[0]` may be a thinking block — collect the `text` blocks
   instead of indexing. `callClaude()` does this.
+- The chat is **not fitness-flavoured** — objectives are general life goals. Keep FitTrack, meals,
+  and workouts out of that prompt and out of its context.
+- **The coach's tools never write without confirmation.** `OBJECTIVE_TOOLS` (`add_objective`,
+  `add_steps`, `update_objective`, `delete_objective`) come back as `tool_use` blocks that the
+  backend turns into `actions` and returns unexecuted. `runObjectiveTool()` only runs on a second
+  request carrying `decisions`. The frontend blocks the input box until the user picks Do it/Skip,
+  since a dangling `tool_use` with no `tool_result` is a 400 on the next turn.
+- **Assistant turns are stored as raw `content` blocks, not strings.** Thinking blocks carry
+  signatures the API rejects if edited, so the client replays `content` verbatim and renders only
+  the `text` blocks (`textOf()` in `ObjectivesChat.jsx`).
 - **No streaming is possible in Apps Script.** `UrlFetchApp` blocks, so a chat turn is one round
   trip with a pending indicator. `effort: 'low'` is the main latency lever.
 
@@ -220,7 +233,7 @@ Objectives AI notes:
 - `src/components/LogMeal.jsx` — Saved meals list, "Log to Today", Create Meal flow
 - `src/components/LogWorkout.jsx` — Saved routines, Create Routine, Log Workout Session with pre-fill
 - `src/components/Objectives.jsx` — Objectives sub-app: short/mid/long term collapsible sections, add/score/finish/re-add/remove, per-objective steps
-- `src/components/ObjectivesChat.jsx` — Goal-coach chat with starter prompts and a Sonnet/Opus toggle
+- `src/components/ObjectivesChat.jsx` — Goal-coach chat with starter prompts, a Sonnet/Opus toggle, and the confirm-before-write card for proposed objective edits
 - `src/api/sheets.js` — All API functions (POST to Apps Script)
 - `src/config.js` — API_URL (gitignored, generated in CI from secret)
 - `src/data/ingredients.json` — 24 ingredients with macros (local cache)

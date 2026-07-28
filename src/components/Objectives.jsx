@@ -88,15 +88,19 @@ export default function Objectives({ onNavigate }) {
     setTimeout(() => setToast(null), 2500)
   }
 
-  useEffect(() => {
-    getObjectivesBundle()
+  // Also called after the coach writes something, so the list reflects the Sheet.
+  function loadAll() {
+    return getObjectivesBundle()
       .then(({ objectives: objectiveRows, steps: stepRows }) => {
         setObjectives(objectiveRows || [])
         setSteps(stepRows || [])
+        setError(null)
       })
       .catch(err => setError(err.message))
       .finally(() => setLoading(false))
-  }, [])
+  }
+
+  useEffect(() => { loadAll() }, [])
 
   const byTerm = useMemo(() => {
     const groups = {}
@@ -302,7 +306,7 @@ export default function Objectives({ onNavigate }) {
     persistSteps([...steps, ...rows], () => addObjectiveSteps(rows), 'Failed to add steps. Try again.')
   }
 
-  if (chatOpen) return <ObjectivesChat onClose={() => setChatOpen(false)} />
+  if (chatOpen) return <ObjectivesChat onClose={() => setChatOpen(false)} onChanged={loadAll} />
 
   return (
     <div className="p-4">
