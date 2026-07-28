@@ -75,8 +75,12 @@ export default function Objectives({ onNavigate }) {
   const [steps, setSteps] = useState([])
   const [addingStepTo, setAddingStepTo] = useState(null)
   const [newStepText, setNewStepText] = useState('')
+  const [editingStepId, setEditingStepId] = useState(null)
+  const [editStepText, setEditStepText] = useState('')
   const [suggestingFor, setSuggestingFor] = useState(null)
   const [suggested, setSuggested] = useState(null)
+  const [steerFor, setSteerFor] = useState(null)
+  const [steerText, setSteerText] = useState('')
   const [chatOpen, setChatOpen] = useState(false)
 
   function showToast(msg) {
@@ -169,6 +173,10 @@ export default function Objectives({ onNavigate }) {
     setEditingId(null)
     setAddingStepTo(null)
     setSuggested(null)
+    setSteerFor(null)
+    setSteerText('')
+    setEditingStepId(null)
+    setEditStepText('')
     setExpandedId(cur => (cur === id ? null : id))
   }
 
@@ -253,12 +261,30 @@ export default function Objectives({ onNavigate }) {
     persistSteps(next, () => deleteObjectiveStep(s.Step_ID), 'Failed to remove step. Try again.')
   }
 
+  function startEditStep(s) {
+    setEditingStepId(s.Step_ID)
+    setEditStepText(s.Text)
+  }
+
+  function handleEditStep(s) {
+    const text = editStepText.trim()
+    setEditingStepId(null)
+    setEditStepText('')
+    if (!text || text === s.Text) return
+    const next = steps.map(x => (x.Step_ID === s.Step_ID ? { ...x, Text: text } : x))
+    persistSteps(next, () => updateObjectiveStep(s.Step_ID, { Text: text }), 'Failed to save step. Try again.')
+  }
+
+  // Steering is optional - sending it empty is the old behaviour exactly.
   async function handleSuggest(o) {
+    const steering = steerText.trim()
+    setSteerFor(null)
+    setSteerText('')
     setSuggestingFor(o.Objective_ID)
     setSuggested(null)
     try {
       const model = localStorage.getItem('fittrack_ai_model') || 'sonnet'
-      const data = await suggestSteps(o.Objective_ID, model)
+      const data = await suggestSteps(o.Objective_ID, model, steering)
       setSuggested({ objectiveId: o.Objective_ID, steps: data.steps || [] })
     } catch (err) {
       showToast(err.message)
@@ -452,26 +478,61 @@ export default function Objectives({ onNavigate }) {
                                 {objSteps.length > 0 && (
                                   <div className="space-y-1 mb-2">
                                     {objSteps.map(s => (
-                                      <div key={s.Step_ID} className="flex items-center gap-2">
-                                        <button
-                                          onClick={() => handleToggleStep(s)}
-                                          className="flex-1 text-left flex items-center gap-3 min-h-[44px]"
-                                        >
-                                          <span className={stepDone(s) ? 'text-green-500' : 'text-gray-500'}>
-                                            {stepDone(s) ? '☑' : '☐'}
-                                          </span>
-                                          <span className={`text-sm ${stepDone(s) ? 'line-through text-gray-500' : 'text-gray-200'}`}>
-                                            {s.Text}
-                                          </span>
-                                        </button>
-                                        <button
-                                          onClick={() => handleRemoveStep(s)}
-                                          aria-label="Remove step"
-                                          className="text-gray-500 min-w-[44px] min-h-[44px] flex items-center justify-center"
-                                        >
-                                          &times;
-                                        </button>
-                                      </div>
+                                      editingStepId === s.Step_ID ? (
+                                        <div key={s.Step_ID} className="bg-gray-700 rounded-lg p-3">
+                                          <input
+                                            type="text"
+                                            value={editStepText}
+                                            onChange={e => setEditStepText(e.target.value)}
+                                            onKeyDown={e => e.key === 'Enter' && handleEditStep(s)}
+                                            autoFocus
+                                            className="w-full bg-gray-800 rounded-lg p-3 text-white placeholder-gray-500"
+                                          />
+                                          <div className="grid grid-cols-2 gap-2 mt-3">
+                                            <button
+                                              onClick={() => { setEditingStepId(null); setEditStepText('') }}
+                                              className="py-3 rounded-lg bg-gray-600 text-gray-200 font-semibold min-h-[48px]"
+                                            >
+                                              Cancel
+                                            </button>
+                                            <button
+                                              onClick={() => handleEditStep(s)}
+                                              disabled={!editStepText.trim()}
+                                              className="py-3 rounded-lg bg-teal-600 text-white font-semibold min-h-[48px] active:bg-teal-700 disabled:opacity-50"
+                                            >
+                                              Save
+                                            </button>
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <div key={s.Step_ID} className="flex items-center gap-2">
+                                          <button
+                                            onClick={() => handleToggleStep(s)}
+                                            className="flex-1 text-left flex items-center gap-3 min-h-[44px]"
+                                          >
+                                            <span className={stepDone(s) ? 'text-green-500' : 'text-gray-500'}>
+                                              {stepDone(s) ? '☑' : '☐'}
+                                            </span>
+                                            <span className={`text-sm ${stepDone(s) ? 'line-through text-gray-500' : 'text-gray-200'}`}>
+                                              {s.Text}
+                                            </span>
+                                          </button>
+                                          <button
+                                            onClick={() => startEditStep(s)}
+                                            aria-label="Edit step"
+                                            className="text-gray-500 min-w-[44px] min-h-[44px] flex items-center justify-center"
+                                          >
+                                            ✎
+                                          </button>
+                                          <button
+                                            onClick={() => handleRemoveStep(s)}
+                                            aria-label="Remove step"
+                                            className="text-gray-500 min-w-[44px] min-h-[44px] flex items-center justify-center"
+                                          >
+                                            &times;
+                                          </button>
+                                        </div>
+                                      )
                                     ))}
                                   </div>
                                 )}
@@ -527,6 +588,33 @@ export default function Objectives({ onNavigate }) {
                                       </button>
                                     </div>
                                   </div>
+                                ) : steerFor === o.Objective_ID ? (
+                                  <div className="bg-gray-900 border border-purple-500 rounded-lg p-3 mb-2">
+                                    <p className="text-xs text-purple-300 mb-2">Any direction for the steps? Optional.</p>
+                                    <input
+                                      type="text"
+                                      value={steerText}
+                                      onChange={e => setSteerText(e.target.value)}
+                                      onKeyDown={e => e.key === 'Enter' && handleSuggest(o)}
+                                      placeholder="e.g. gym only, next 2 weeks"
+                                      autoFocus
+                                      className="w-full bg-gray-800 rounded-lg p-3 text-white placeholder-gray-500"
+                                    />
+                                    <div className="grid grid-cols-2 gap-2 mt-3">
+                                      <button
+                                        onClick={() => { setSteerFor(null); setSteerText('') }}
+                                        className="py-3 rounded-lg bg-gray-600 text-gray-200 font-semibold min-h-[48px]"
+                                      >
+                                        Cancel
+                                      </button>
+                                      <button
+                                        onClick={() => handleSuggest(o)}
+                                        className="py-3 rounded-lg bg-purple-600 text-white font-semibold min-h-[48px] active:bg-purple-700"
+                                      >
+                                        {steerText.trim() ? 'Suggest' : 'Skip & suggest'}
+                                      </button>
+                                    </div>
+                                  </div>
                                 ) : (
                                   <div className="grid grid-cols-2 gap-2 mb-1">
                                     <button
@@ -536,7 +624,7 @@ export default function Objectives({ onNavigate }) {
                                       + Add step
                                     </button>
                                     <button
-                                      onClick={() => handleSuggest(o)}
+                                      onClick={() => { setSteerFor(o.Objective_ID); setSteerText('') }}
                                       disabled={suggestingFor === o.Objective_ID}
                                       className="py-3 rounded-lg bg-purple-600 text-white font-semibold min-h-[48px] text-sm active:bg-purple-700 disabled:opacity-50"
                                     >

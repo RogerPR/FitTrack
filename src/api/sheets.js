@@ -59,4 +59,4 @@ export const addObjectiveSteps = (steps) => callApi('addObjectiveSteps', { steps
 export const updateObjectiveStep = (id, fields) => callApi('updateObjectiveStep', { id, fields })
 export const deleteObjectiveStep = (id) => callApi('deleteObjectiveStep', { id })
 export const objectivesChat = (messages, model) => callApi('objectivesChat', { messages, model })
-export const suggestSteps = (objectiveId, model) => callApi('suggestSteps', { objectiveId, model })
+export const suggestSteps = (objectiveId, model, steering) => callApi('suggestSteps', { objectiveId, model, steering })

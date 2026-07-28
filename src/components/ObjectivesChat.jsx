@@ -17,6 +17,7 @@ export default function ObjectivesChat({ onClose }) {
   const [pending, setPending] = useState(false)
   const [error, setError] = useState(null)
   const [model, setModel] = useState(() => localStorage.getItem('fittrack_ai_model') || 'sonnet')
+  const [starter, setStarter] = useState(null)
   const bottomRef = useRef(null)
 
   useEffect(() => {
@@ -42,11 +43,18 @@ export default function ObjectivesChat({ onClose }) {
     }
   }
 
+  // A picked starter can be sent bare, or with whatever the user typed appended
+  // to it — so the fast path stays one tap and steering costs nothing extra.
   function handleSend() {
+    if (pending) return
     const text = input.trim()
-    if (!text || pending) return
+    if (!text && !starter) return
+    const content = starter
+      ? (text ? starter.prompt + '\n\n' + text : starter.prompt)
+      : text
     setInput('')
-    send([...messages, { role: 'user', content: text }])
+    setStarter(null)
+    send([...messages, { role: 'user', content }])
   }
 
   // The failed turn is still the last message, so resending the same history retries it.
@@ -56,8 +64,9 @@ export default function ObjectivesChat({ onClose }) {
   }
 
   return (
-    // pb-40 clears the fixed input bar plus the fixed bottom nav beneath it
-    <div className="p-4 pb-40">
+    // pb clears the fixed input bar plus the fixed bottom nav beneath it, and
+    // the starter chip makes that bar taller
+    <div className={`p-4 ${starter ? 'pb-56' : 'pb-40'}`}>
       <div className="flex items-center gap-2 mb-4">
         <button onClick={onClose} className="text-teal-400 min-w-[48px] min-h-[48px] flex items-center justify-center">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6">
@@ -67,7 +76,7 @@ export default function ObjectivesChat({ onClose }) {
         <h1 className="text-2xl font-bold flex-1">Coach</h1>
         {messages.length > 0 && (
           <button
-            onClick={() => { setMessages([]); setError(null) }}
+            onClick={() => { setMessages([]); setError(null); setStarter(null) }}
             className="text-gray-400 text-sm font-semibold px-3 min-h-[44px]"
           >
             Clear
@@ -96,8 +105,12 @@ export default function ObjectivesChat({ onClose }) {
             {STARTERS.map(s => (
               <button
                 key={s.label}
-                onClick={() => send([{ role: 'user', content: s.prompt }])}
-                className="w-full text-left bg-gray-800 rounded-xl p-4 min-h-[48px] border border-gray-700 active:bg-gray-700"
+                onClick={() => setStarter(s)}
+                className={`w-full text-left rounded-xl p-4 min-h-[48px] border active:bg-gray-700 ${
+                  starter?.label === s.label
+                    ? 'bg-gray-800 border-purple-500'
+                    : 'bg-gray-800 border-gray-700'
+                }`}
               >
                 <p className="font-semibold">{s.label}</p>
               </button>
@@ -137,22 +150,36 @@ export default function ObjectivesChat({ onClose }) {
         <div ref={bottomRef} />
       </div>
 
-      <div className="fixed bottom-20 left-0 right-0 p-3 flex gap-2 bg-gray-950 border-t border-gray-800">
-        <input
-          type="text"
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && handleSend()}
-          placeholder="Ask anything..."
-          className="flex-1 bg-gray-800 rounded-lg p-3 text-white placeholder-gray-500 min-h-[48px]"
-        />
-        <button
-          onClick={handleSend}
-          disabled={!input.trim() || pending}
-          className="bg-purple-600 text-white px-5 rounded-lg font-semibold min-h-[48px] active:bg-purple-700 disabled:opacity-50"
-        >
-          Send
-        </button>
+      <div className="fixed bottom-20 left-0 right-0 p-3 bg-gray-950 border-t border-gray-800">
+        {starter && (
+          <div className="flex items-center gap-2 mb-2 bg-gray-800 border border-purple-500 rounded-lg px-3 py-2">
+            <p className="flex-1 text-sm text-purple-300 font-semibold">{starter.label}</p>
+            <button
+              onClick={() => setStarter(null)}
+              aria-label="Remove starter"
+              className="text-gray-400 min-w-[44px] min-h-[44px] flex items-center justify-center"
+            >
+              &times;
+            </button>
+          </div>
+        )}
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleSend()}
+            placeholder={starter ? 'Add anything specific? Optional' : 'Ask anything...'}
+            className="flex-1 bg-gray-800 rounded-lg p-3 text-white placeholder-gray-500 min-h-[48px]"
+          />
+          <button
+            onClick={handleSend}
+            disabled={(!input.trim() && !starter) || pending}
+            className="bg-purple-600 text-white px-5 rounded-lg font-semibold min-h-[48px] active:bg-purple-700 disabled:opacity-50"
+          >
+            Send
+          </button>
+        </div>
       </div>
     </div>
   )

@@ -875,7 +875,18 @@ function handleSuggestSteps(body) {
   ].join('\n');
 
   var user = [
-    'Generate steps for this objective: [' + target.Objective_ID + '] "' + target.Text + '"',
+    'Generate steps for this objective: [' + target.Objective_ID + '] "' + target.Text + '"'
+  ];
+
+  // Optional steering typed on the phone before asking. Capped because it goes
+  // straight into the prompt and there is no reason for it to be an essay.
+  var steering = String(body.steering || '').trim().substring(0, 500);
+  if (steering) {
+    user.push('');
+    user.push('Extra direction from me, follow it closely: ' + steering);
+  }
+
+  user = user.concat([
     '',
     'Rules:',
     '- Between 2 and 10 steps. Fewer is better if fewer will do.',
@@ -885,7 +896,7 @@ function handleSuggestSteps(body) {
     '- Do not repeat steps this objective already has.',
     '',
     'Respond with ONLY a JSON object in this exact format: {"steps": ["first step", "second step"]}'
-  ].join('\n');
+  ]).join('\n');
 
   var res = callClaude(body.model, system, [{ role: 'user', content: user }], 1536, 'medium');
   if (!res.ok) return { success: false, error: res.error };
