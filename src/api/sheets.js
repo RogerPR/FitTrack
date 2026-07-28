@@ -1,17 +1,32 @@
 import { API_URL } from '../config.js'
 
+// Apps Script answers a POST with a 302 to script.googleusercontent.com, and that
+// second hop intermittently 404s. Only reads are retried: by the time the redirect
+// is issued the script has already run, so retrying a write would duplicate it.
+const RETRYABLE = new Set([404, 429, 500, 502, 503])
+
 async function callApi(action, params = {}) {
-  const res = await fetch(API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ action, key: localStorage.getItem('fittrack_pw') || '', ...params }),
-  })
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  const json = await res.json()
-  if (!json.success) throw new Error(json.error || 'Unknown error')
-  return json.data
+  const body = JSON.stringify({ action, key: localStorage.getItem('fittrack_pw') || '', ...params })
+  const canRetry = action.startsWith('get')
+
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body,
+    })
+    if (res.ok) {
+      const json = await res.json()
+      if (!json.success) throw new Error(json.error || 'Unknown error')
+      return json.data
+    }
+    if (!canRetry || !RETRYABLE.has(res.status) || attempt >= 2) throw new Error(`HTTP ${res.status}`)
+    await new Promise(r => setTimeout(r, 400 * 2 ** attempt))
+  }
 }
 
+export const getDashboard = (date) => callApi('getDashboard', { date })
+export const getObjectivesBundle = () => callApi('getObjectivesBundle')
 export const getIngredients = () => callApi('getIngredients')
 export const getSavedMeals = () => callApi('getSavedMeals')
 export const saveMeal = (rows) => callApi('saveMeal', { rows })

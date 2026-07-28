@@ -10,6 +10,8 @@ function doPost(e) {
       return respond({ success: false, error: 'Unauthorized' });
     }
     switch (body.action) {
+      case 'getDashboard':         return respond(handleGetDashboard(body));
+      case 'getObjectivesBundle':  return respond(handleGetObjectivesBundle());
       case 'getIngredients':       return respond(handleGetIngredients());
       case 'getSavedMeals':        return respond(handleGetSavedMeals());
       case 'saveMeal':             return respond(handleSaveMeal(body));
@@ -279,6 +281,25 @@ function populateStarterRoutines() {
 }
 
 // --- Action Handlers ---
+
+// Batched reads: one round trip instead of several parallel ones, which Apps Script
+// serializes per user anyway.
+function handleGetDashboard(body) {
+  return { success: true, data: {
+    meals: handleGetDailyMeals(body).data,
+    workout: handleGetDailyWorkout(body).data,
+    goals: handleGetGoals().data,
+  } };
+}
+
+function handleGetObjectivesBundle() {
+  var steps = handleGetObjectiveSteps();
+  if (!steps.success) return steps;
+  return { success: true, data: {
+    objectives: handleGetObjectives().data,
+    steps: steps.data,
+  } };
+}
 
 function handleGetIngredients() {
   return { success: true, data: getSheetData('Ingredients') };

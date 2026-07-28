@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getDailyMeals, deleteDailyMeal, getDailyWorkout, getGoals } from '../api/sheets'
+import { getDashboard, deleteDailyMeal } from '../api/sheets'
 import SuggestMeals from './SuggestMeals'
 
 function today() {
@@ -24,8 +24,8 @@ export default function Dashboard({ onNavigate, refreshKey, date, onDateChange }
   function loadData(d) {
     setLoading(true)
     setError(null)
-    Promise.all([getDailyMeals(d), getDailyWorkout(d), getGoals()])
-      .then(([mealsData, workoutData, goalsData]) => {
+    getDashboard(d)
+      .then(({ meals: mealsData, workout: workoutData, goals: goalsData }) => {
         setMeals(mealsData || {})
         setWorkout(workoutData || {})
         setGoals(goalsData)

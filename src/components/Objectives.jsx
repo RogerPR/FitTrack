@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import {
-  getObjectives, addObjective, updateObjective, deleteObjective,
-  getObjectiveSteps, addObjectiveSteps, updateObjectiveStep, deleteObjectiveStep, suggestSteps,
+  getObjectivesBundle, addObjective, updateObjective, deleteObjective,
+  addObjectiveSteps, updateObjectiveStep, deleteObjectiveStep, suggestSteps,
 } from '../api/sheets'
 import ObjectivesChat from './ObjectivesChat'
 
@@ -85,8 +85,8 @@ export default function Objectives({ onNavigate }) {
   }
 
   useEffect(() => {
-    Promise.all([getObjectives(), getObjectiveSteps()])
-      .then(([objectiveRows, stepRows]) => {
+    getObjectivesBundle()
+      .then(({ objectives: objectiveRows, steps: stepRows }) => {
         setObjectives(objectiveRows || [])
         setSteps(stepRows || [])
       })

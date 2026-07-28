@@ -143,6 +143,14 @@ Chicken breast, White rice, Olive oil, Banana, Oats, Whole wheat bread, Eggs, Mi
 
 The Apps Script web app exposes a single URL. All requests are POST with a JSON body containing an `action` field.
 
+Reads whose results are always needed together are batched into a single action, since Apps Script
+serializes executions per user and every extra round trip is another chance to hit the redirect 404
+(see Known Gotchas):
+- `getDashboard(date)` → `{ meals, workout, goals }` — what the Dashboard needs in one call
+- `getObjectivesBundle` → `{ objectives, steps }`
+
+The underlying single-purpose actions are still exposed and still work.
+
 Endpoints (actions):
 - `getIngredients` → returns all rows from Ingredients tab
 - `getSavedMeals` → returns all saved meals (grouped by Meal_ID)
@@ -223,6 +231,13 @@ Objectives AI notes:
 - **Apps Script `instanceof Date` is broken.** `getValues()` returns Date objects that fail `instanceof Date`. Use `typeof val.getTime === 'function'` instead.
 - **`setup()` must be re-run after adding a Sheets tab.** It is idempotent and won't touch existing data, but a missing tab surfaces as a runtime error on the first read.
 - **Long-term objectives have no `Due_Date`.** `daysUntil()` returns `null` for an empty date rather than `NaN`; anything rendering a due date or urgency colour must branch on it.
+- **Intermittent HTTP 404 on API calls.** A POST to `/exec` is answered with a 302 to
+  `script.googleusercontent.com/macros/echo?user_content_key=...`; `fetch` follows it transparently,
+  so `res.status` is the status of that *second* hop, which Google intermittently 404s. It is not a
+  bad API URL — a wrong URL fails every time, not sometimes. `callApi()` retries these (plus 429/5xx)
+  twice with backoff, but **only for `get*` actions**: the redirect is issued after `doPost` has
+  already run, so retrying a write would duplicate the row. Writes surface the error for a manual
+  retry instead.
 - **Apps Script deployment versioning.** Editing code in the script editor does NOT update the live web app. Must: Manage deployments → edit → Version: "New version" → Deploy.
 - **`src/config.js` is gitignored.** The API URL is injected via the `VITE_API_URL` GitHub Actions secret during CI build. Update both local file and secret when the deployment URL changes.
 
