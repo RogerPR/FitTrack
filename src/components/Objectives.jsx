@@ -4,6 +4,7 @@ import {
   addObjectiveSteps, updateObjectiveStep, deleteObjectiveStep, suggestSteps, saveProfile,
 } from '../api/sheets'
 import ObjectivesChat from './ObjectivesChat'
+import WeeklySurvey from './WeeklySurvey'
 
 const TERMS = [
   { id: 'short', label: 'Short term', sub: '2 weeks' },
@@ -85,6 +86,7 @@ export default function Objectives({ onNavigate }) {
   const [steerFor, setSteerFor] = useState(null)
   const [steerText, setSteerText] = useState('')
   const [chatOpen, setChatOpen] = useState(false)
+  const [surveyOpen, setSurveyOpen] = useState(false)
 
   // Free text about the user, sent to the AI as context. Held here so the chat
   // and the suggest-steps flow both pick up an edit without a reload.
@@ -125,6 +127,12 @@ export default function Objectives({ onNavigate }) {
     }
     return groups
   }, [objectives])
+
+  // Only what is still open and has a deadline is worth a weekly check-in.
+  const surveyObjectives = useMemo(
+    () => objectives.filter(o => !isDone(o) && (o.Term === 'short' || o.Term === 'mid')),
+    [objectives]
+  )
 
   const stepsByObjective = useMemo(() => {
     const groups = {}
@@ -340,6 +348,15 @@ export default function Objectives({ onNavigate }) {
 
   if (chatOpen) return <ObjectivesChat onClose={() => setChatOpen(false)} onChanged={loadAll} />
 
+  if (surveyOpen) return (
+    <WeeklySurvey
+      objectives={surveyObjectives}
+      date={today()}
+      onClose={() => setSurveyOpen(false)}
+      onSaved={() => { setSurveyOpen(false); showToast('Survey saved') }}
+    />
+  )
+
   return (
     <div className="p-4">
       <div className="flex items-center gap-3 mb-4">
@@ -369,6 +386,13 @@ export default function Objectives({ onNavigate }) {
           </svg>
         </button>
       </div>
+
+      <button
+        onClick={() => setSurveyOpen(true)}
+        className="w-full py-3 mb-4 rounded-lg bg-gray-800 border border-gray-700 text-teal-400 font-semibold min-h-[48px] active:bg-gray-700"
+      >
+        Weekly survey
+      </button>
 
       {loading && <p className="text-gray-400">Loading objectives...</p>}
       {error && <p className="text-red-400">Error: {error}</p>}

@@ -43,6 +43,7 @@ function doPost(e) {
       case 'addObjectiveSteps':    return respond(handleAddObjectiveSteps(body));
       case 'updateObjectiveStep':  return respond(handleUpdateObjectiveStep(body));
       case 'deleteObjectiveStep':  return respond(handleDeleteObjectiveStep(body));
+      case 'saveWeeklySurvey':     return respond(handleSaveWeeklySurvey(body));
       case 'getProfile':           return respond(handleGetProfile());
       case 'saveProfile':          return respond(handleSaveProfile(body));
       case 'objectivesChat':       return respond(handleObjectivesChat(body));
@@ -169,6 +170,7 @@ function setup() {
     'Body Log':        ['Date', 'Weight_kg', 'Fat_pct'],
     'Objectives':      ['Objective_ID', 'Term', 'Text', 'Start_Date', 'Due_Date', 'Completed', 'Score'],
     'Objective Steps': ['Step_ID', 'Objective_ID', 'Step_Num', 'Text', 'Done'],
+    'Weekly Survey':   ['Date', 'Objective_ID', 'Term', 'Text', 'Score'],
     'Profile':         ['Text']
   };
 
@@ -706,6 +708,20 @@ function handleUpdateObjectiveStep(body) {
 
 function handleDeleteObjectiveStep(body) {
   deleteRowsWhere('Objective Steps', 'Step_ID', body.id);
+  return { success: true, data: null };
+}
+
+// --- Weekly survey ---
+
+// One row per objective per submission. Text is a denormalized snapshot so the raw
+// sheet is readable without joining back to Objectives. Nothing reads this back.
+function handleSaveWeeklySurvey(body) {
+  var rows = body.rows || [];
+  if (!rows.length) return { success: false, error: 'No survey rows provided' };
+  if (!getSheet('Weekly Survey')) {
+    return { success: false, error: 'Weekly Survey tab is missing - run setup() in the Apps Script editor' };
+  }
+  appendRows('Weekly Survey', rows);
   return { success: true, data: null };
 }
 

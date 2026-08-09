@@ -93,6 +93,16 @@ One row per step. Identity is `Step_ID` (client-minted, `step_<timestamp>_<i>`) 
 display order only, so appending never renumbers existing rows. `Done` is `y` or empty, same
 boolean-coercion reason as `Completed`. Deleting an objective cascades to its steps server-side.
 
+### Tab: "Weekly Survey"
+| Date | Objective_ID | Term | Text | Score |
+|------|--------------|------|------|-------|
+
+One row per objective per submission, written by the "Weekly survey" button on the Objectives
+screen. Covers only *active* short- and mid-term objectives. `Text` is a denormalized snapshot of
+the objective wording so the raw sheet reads without joining back to Objectives. Nothing in the app
+reads this data back — it exists to be looked at in Sheets — and it is deliberately **not** part of
+`buildObjectivesContext()`. No cadence enforcement: submitting twice in a week appends twice.
+
 ### Tab: "Profile"
 | Text |
 |------|
@@ -181,6 +191,7 @@ Endpoints (actions):
 - `addObjectiveSteps(steps)` → appends step rows
 - `updateObjectiveStep(id, fields)` → sets the given columns on the matching Step_ID row
 - `deleteObjectiveStep(id)` → removes the step row
+- `saveWeeklySurvey(rows)` → appends weekly survey rows (one per objective)
 - `objectivesChat(messages, model, decisions?)` → multi-turn chat over the objectives context →
   `{ reply, content, actions, toolResults }`. The coach has tools that edit objectives; a turn that
   calls one returns `actions` (proposals) and writes nothing. Sending the same `messages` back with
@@ -242,7 +253,8 @@ Objectives AI notes:
 - `src/components/Dashboard.jsx` — Daily summary, macro totals, meal/workout lists, refresh button
 - `src/components/LogMeal.jsx` — Saved meals list, "Log to Today", Create Meal flow
 - `src/components/LogWorkout.jsx` — Saved routines, Create Routine, Log Workout Session with pre-fill
-- `src/components/Objectives.jsx` — Objectives sub-app: short/mid/long term collapsible sections, add/score/finish/re-add/remove, per-objective steps, "About me" profile popup
+- `src/components/Objectives.jsx` — Objectives sub-app: short/mid/long term collapsible sections, add/score/finish/re-add/remove, per-objective steps, "About me" profile popup, "Weekly survey" button
+- `src/components/WeeklySurvey.jsx` — Weekly check-in: rates every active short/mid objective 1-5, appends one dated row each
 - `src/components/ObjectivesChat.jsx` — Goal-coach chat with starter prompts, a Sonnet/Opus toggle, and the confirm-before-write card for proposed objective edits
 - `src/api/sheets.js` — All API functions (POST to Apps Script)
 - `src/config.js` — API_URL (gitignored, generated in CI from secret)
