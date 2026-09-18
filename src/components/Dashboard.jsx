@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getDashboard, deleteDailyMeal } from '../api/sheets'
+import { readCache, getDashboard, deleteDailyMeal } from '../api/sheets'
 import SuggestMeals from './SuggestMeals'
 
 function today() {
@@ -22,7 +22,13 @@ export default function Dashboard({ onNavigate, refreshKey, date, onDateChange }
   const [showSuggest, setShowSuggest] = useState(false)
 
   function loadData(d) {
-    setLoading(true)
+    const cached = readCache('getDashboard', { date: d })
+    if (cached) {
+      setMeals(cached.meals || {})
+      setWorkout(cached.workout || {})
+      setGoals(cached.goals)
+    }
+    setLoading(!cached)
     setError(null)
     getDashboard(d)
       .then(({ meals: mealsData, workout: workoutData, goals: goalsData }) => {
@@ -190,7 +196,12 @@ export default function Dashboard({ onNavigate, refreshKey, date, onDateChange }
       </h2>
 
       {loading && <p className="text-gray-400">Loading...</p>}
-      {error && <p className="text-red-400">Error: {error}</p>}
+      {error && (
+        <p className="text-red-400">
+          Error: {error} ·{' '}
+          <button onClick={() => loadData(date)} className="underline font-semibold">Retry</button>
+        </p>
+      )}
 
       {!loading && mealEntries.length === 0 && (
         <p className="text-gray-400">No meals logged{isToday ? ' yet today' : ''}.</p>

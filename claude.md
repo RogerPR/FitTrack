@@ -269,10 +269,14 @@ Objectives AI notes:
 - **Intermittent HTTP 404 on API calls.** A POST to `/exec` is answered with a 302 to
   `script.googleusercontent.com/macros/echo?user_content_key=...`; `fetch` follows it transparently,
   so `res.status` is the status of that *second* hop, which Google intermittently 404s. It is not a
-  bad API URL — a wrong URL fails every time, not sometimes. `callApi()` retries these (plus 429/5xx)
-  twice with backoff, but **only for `get*` actions**: the redirect is issued after `doPost` has
-  already run, so retrying a write would duplicate the row. Writes surface the error for a manual
-  retry instead.
+  bad API URL — a wrong URL fails every time, not sometimes. `callApi()` retries any failure
+  (bad status, network error, unparsable body) up to 5 times with backoff, but **only for `get*`
+  actions**: the redirect is issued after `doPost` has already run, so retrying a write would
+  duplicate the row. Writes surface the error for a manual retry instead. Every successful read is
+  cached in `localStorage` under `fittrack_cache:<action>:<params>`; when a read's retries are
+  exhausted the cached copy is returned and a `fittrack-stale` window event shows the yellow
+  "showing last saved data" banner in `App.jsx`. List screens seed their initial state from that
+  cache via `readCache()`, so a bad request shows stale data rather than an empty screen.
 - **Apps Script deployment versioning.** Editing code in the script editor does NOT update the live web app. Must: Manage deployments → edit → Version: "New version" → Deploy.
 - **`src/config.js` is gitignored.** The API URL is injected via the `VITE_API_URL` GitHub Actions secret during CI build. Update both local file and secret when the deployment URL changes.
 

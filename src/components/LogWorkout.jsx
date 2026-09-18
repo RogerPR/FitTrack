@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import exercisesData from '../data/exercises.json'
-import { getSavedRoutines, saveRoutine, logWorkout, getLastWorkoutWeights } from '../api/sheets'
+import { readCache, getSavedRoutines, saveRoutine, logWorkout, getLastWorkoutWeights } from '../api/sheets'
 
 function today() {
   return new Date().toISOString().slice(0, 10)
@@ -8,14 +8,14 @@ function today() {
 
 export default function LogWorkout({ date }) {
   const [view, setView] = useState('list') // 'list', 'create', 'log'
-  const [routines, setRoutines] = useState({})
-  const [loading, setLoading] = useState(true)
+  const [routines, setRoutines] = useState(() => readCache('getSavedRoutines') || {})
+  const [loading, setLoading] = useState(() => !readCache('getSavedRoutines'))
   const [error, setError] = useState(null)
   const [toast, setToast] = useState(null)
   const [activeRoutine, setActiveRoutine] = useState(null) // { id, name, exercises }
 
   function loadRoutines() {
-    setLoading(true)
+    setLoading(Object.keys(routines).length === 0)
     setError(null)
     getSavedRoutines()
       .then(data => setRoutines(data || {}))
@@ -75,7 +75,12 @@ export default function LogWorkout({ date }) {
       </button>
 
       {loading && <p className="text-gray-400">Loading routines...</p>}
-      {error && <p className="text-red-400">Error: {error}</p>}
+      {error && (
+        <p className="text-red-400">
+          Error: {error} ·{' '}
+          <button onClick={loadRoutines} className="underline font-semibold">Retry</button>
+        </p>
+      )}
 
       {!loading && routineEntries.length === 0 && (
         <p className="text-gray-400">No saved routines yet.</p>

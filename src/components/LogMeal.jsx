@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { getIngredientsList, invalidateIngredientCache } from '../data/ingredientCache'
-import { getSavedMeals, saveMeal, logMeal, getMealUsageCounts, analyzeFood, describeMeal, analyzeFoodPaid, describeMealPaid, addIngredient } from '../api/sheets'
+import { readCache, getSavedMeals, saveMeal, logMeal, getMealUsageCounts, analyzeFood, describeMeal, analyzeFoodPaid, describeMealPaid, addIngredient } from '../api/sheets'
 
 function today() {
   return new Date().toISOString().slice(0, 10)
@@ -8,17 +8,17 @@ function today() {
 
 export default function LogMeal({ onNavigate, date }) {
   const [view, setView] = useState('list') // 'list', 'create', 'custom', 'snap', or 'describe'
-  const [savedMeals, setSavedMeals] = useState({})
-  const [loading, setLoading] = useState(true)
+  const [savedMeals, setSavedMeals] = useState(() => readCache('getSavedMeals') || {})
+  const [loading, setLoading] = useState(() => !readCache('getSavedMeals'))
   const [error, setError] = useState(null)
   const [expandedMeal, setExpandedMeal] = useState(null)
   const [toast, setToast] = useState(null)
-  const [usageCounts, setUsageCounts] = useState({})
+  const [usageCounts, setUsageCounts] = useState(() => readCache('getMealUsageCounts') || {})
   const [editingMeal, setEditingMeal] = useState(null)
   const [mealSearch, setMealSearch] = useState('')
 
   function loadSavedMeals() {
-    setLoading(true)
+    setLoading(Object.keys(savedMeals).length === 0)
     setError(null)
     Promise.all([getSavedMeals(), getMealUsageCounts().catch(() => ({}))])
       .then(([data, counts]) => {
@@ -156,7 +156,12 @@ export default function LogMeal({ onNavigate, date }) {
       </div>
 
       {loading && <p className="text-gray-400">Loading saved meals...</p>}
-      {error && <p className="text-red-400">Error: {error}</p>}
+      {error && (
+        <p className="text-red-400">
+          Error: {error} ·{' '}
+          <button onClick={loadSavedMeals} className="underline font-semibold">Retry</button>
+        </p>
+      )}
 
       {!loading && Object.keys(savedMeals).length > 0 && (
         <div className="relative mb-3">

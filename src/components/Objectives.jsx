@@ -395,7 +395,12 @@ export default function Objectives({ onNavigate }) {
       </button>
 
       {loading && <p className="text-gray-400">Loading objectives...</p>}
-      {error && <p className="text-red-400">Error: {error}</p>}
+      {error && (
+        <p className="text-red-400">
+          Error: {error} ·{' '}
+          <button onClick={loadAll} className="underline font-semibold">Retry</button>
+        </p>
+      )}
 
       {!loading && !error && (
         <div className="space-y-3">

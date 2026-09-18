@@ -16,7 +16,11 @@ export function getIngredientsList() {
   if (!cached) {
     cached = getIngredients()
       .then(data => dedupe(data && data.length > 0 ? data : fallbackData))
-      .catch(() => dedupe(fallbackData))
+      .catch(() => {
+        // Don't pin the bundled list for the session — retry on the next screen open
+        cached = null
+        return dedupe(fallbackData)
+      })
   }
   return cached
 }

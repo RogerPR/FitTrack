@@ -94,6 +94,7 @@ export default function App() {
   const [active, setActive] = useState('dashboard')
   const [offline, setOffline] = useState(!navigator.onLine)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [stale, setStale] = useState(false)
   const [activeDate, setActiveDate] = useState(today())
 
   function navigateWithRefresh(tab) {
@@ -104,9 +105,18 @@ export default function App() {
   useEffect(() => {
     const on = () => setOffline(false)
     const off = () => setOffline(true)
+    const stale = () => setStale(true)
+    const fresh = () => setStale(false)
     window.addEventListener('online', on)
     window.addEventListener('offline', off)
-    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off) }
+    window.addEventListener('fittrack-stale', stale)
+    window.addEventListener('fittrack-fresh', fresh)
+    return () => {
+      window.removeEventListener('online', on)
+      window.removeEventListener('offline', off)
+      window.removeEventListener('fittrack-stale', stale)
+      window.removeEventListener('fittrack-fresh', fresh)
+    }
   }, [])
 
   if (!unlocked) return <LockScreen onUnlock={() => setUnlocked(true)} />
@@ -116,6 +126,12 @@ export default function App() {
       {offline && (
         <div className="bg-yellow-600 text-white text-center py-2 text-sm font-medium">
           No internet connection
+        </div>
+      )}
+      {stale && !offline && (
+        <div className="bg-yellow-600 text-white text-center py-2 text-sm font-medium">
+          Couldn't reach Google Sheets — showing last saved data ·{' '}
+          <button onClick={() => location.reload()} className="underline font-semibold">Reload</button>
         </div>
       )}
       <div className={active === 'dashboard' ? '' : 'hidden'}><Dashboard onNavigate={setActive} refreshKey={refreshKey} date={activeDate} onDateChange={setActiveDate} /></div>

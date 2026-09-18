@@ -3,25 +3,61 @@ import { API_URL } from '../config.js'
 // Apps Script answers a POST with a 302 to script.googleusercontent.com, and that
 // second hop intermittently 404s. Only reads are retried: by the time the redirect
 // is issued the script has already run, so retrying a write would duplicate it.
-const RETRYABLE = new Set([404, 429, 500, 502, 503])
+// Every successful read is cached in localStorage; when a read's retries are all
+// exhausted the last good copy is served instead of an error.
+const MAX_ATTEMPTS = 5
+
+function cacheKey(action, params) {
+  return `fittrack_cache:${action}:${JSON.stringify(params)}`
+}
+
+export function readCache(action, params = {}) {
+  try {
+    const raw = localStorage.getItem(cacheKey(action, params))
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
+function writeCache(action, params, data) {
+  try {
+    localStorage.setItem(cacheKey(action, params), JSON.stringify(data))
+  } catch {
+    // Quota exceeded or storage blocked — the cache is a best-effort extra
+  }
+}
 
 async function callApi(action, params = {}) {
   const body = JSON.stringify({ action, key: localStorage.getItem('fittrack_pw') || '', ...params })
-  const canRetry = action.startsWith('get')
+  const isRead = action.startsWith('get')
 
   for (let attempt = 0; ; attempt++) {
-    const res = await fetch(API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body,
-    })
-    if (res.ok) {
+    try {
+      const res = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body,
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const json = await res.json()
-      if (!json.success) throw new Error(json.error || 'Unknown error')
+      if (!json.success) throw Object.assign(new Error(json.error || 'Unknown error'), { final: true })
+      if (isRead) {
+        writeCache(action, params, json.data)
+        window.dispatchEvent(new Event('fittrack-fresh'))
+      }
       return json.data
+    } catch (err) {
+      if (!isRead || err.final) throw err
+      if (attempt < MAX_ATTEMPTS - 1) {
+        await new Promise(r => setTimeout(r, 500 * 2 ** attempt))
+        continue
+      }
+      const cached = readCache(action, params)
+      if (cached === null) throw err
+      window.dispatchEvent(new Event('fittrack-stale'))
+      return cached
     }
-    if (!canRetry || !RETRYABLE.has(res.status) || attempt >= 2) throw new Error(`HTTP ${res.status}`)
-    await new Promise(r => setTimeout(r, 400 * 2 ** attempt))
   }
 }
 
