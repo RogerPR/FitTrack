@@ -1,8 +1,9 @@
 # FitTrack — Personal Fitness & Nutrition Tracker
 
-## Project Status: v1 COMPLETE (Sessions 0-4 done)
+## Project Status: v1 COMPLETE (Sessions 0-4 done) + Stabilization Stage 1
 App is live at https://rogerpr.github.io/FitTrack/ and installable as a PWA on Android.
-Next: Session 5 (Meal Plans + Workout Suggestions) — see roadmap.md.
+Next: Session 5 (Meal Plans + Workout Suggestions), and Stabilization Stage 2 (Cloudflare Worker) when
+the new features need it — both in roadmap.md.
 
 ## Project Overview
 A personal, mobile-first fitness and nutrition tracker for a single user. Static frontend hosted on GitHub Pages, with Google Apps Script as the backend API proxying all reads/writes to a Google Sheet.
@@ -55,10 +56,16 @@ Static reference data. The frontend also keeps a local JSON copy for fast search
 Each row is one ingredient within a meal. A meal like "Oats + Banana" has 2 rows sharing the same Meal_ID.
 
 ### Tab: "Daily Meals"
-| Date | Meal_ID | Meal_Name | Ingredient | Qty_g | Calories | Protein | Carbs | Fat | Fiber | Sugar |
-|------|---------|-----------|------------|-------|----------|---------|-------|-----|-------|-------|
+| Date | Meal_ID | Meal_Name | Ingredient | Qty_g | Calories | Protein | Carbs | Fat | Fiber | Sugar | Log_ID |
+|------|---------|-----------|------------|-------|----------|---------|-------|-----|-------|-------|--------|
 
 Same structure as Saved Meals but with a Date column. Date format: YYYY-MM-DD.
+
+`Log_ID` (`log_<timestamp>_<random>`, client-minted) identifies one *logging event*: every row of a
+meal logged at once shares it. `logMeal` skips a request whose `Log_ID` is already in the tab, so the
+client can replay a write it never got a response for. Reads group by `Log_ID`, falling back to
+`Meal_ID` for rows written before the column existed (those have it empty). The same saved meal logged
+twice in a day is therefore two entries, not one.
 
 ### Tab: "Exercises"
 | Name | Category |
@@ -71,10 +78,11 @@ Static reference. Categories: Biceps, Triceps, Chest, Pull, Legs, Abs.
 |------------|--------------|----------|-------|
 
 ### Tab: "Daily Workouts"
-| Date | Routine_ID | Routine_Name | Exercise | Set_Num | Reps | Weight_kg |
-|------|------------|--------------|----------|---------|------|-----------|
+| Date | Routine_ID | Routine_Name | Exercise | Set_Num | Reps | Weight_kg | Log_ID |
+|------|------------|--------------|----------|---------|------|-----------|--------|
 
-Date format: YYYY-MM-DD.
+Date format: YYYY-MM-DD. `Log_ID` works exactly as in Daily Meals: one per saved session, deduped
+server-side, grouped on read with `Routine_ID` as the fallback for old rows.
 
 ### Tab: "Objectives"
 | Objective_ID | Term | Text | Start_Date | Due_Date | Completed | Score |
@@ -167,6 +175,7 @@ serializes executions per user and every extra round trip is another chance to h
 (see Known Gotchas):
 - `getDashboard(date)` → `{ meals, workout, goals }` — what the Dashboard needs in one call
 - `getObjectivesBundle` → `{ objectives, steps, profile }`
+- `getMealsBundle` → `{ meals, counts }` — saved meals plus usage counts for the Log Meal list
 
 The underlying single-purpose actions are still exposed and still work.
 
@@ -174,13 +183,14 @@ Endpoints (actions):
 - `getIngredients` → returns all rows from Ingredients tab
 - `getSavedMeals` → returns all saved meals (grouped by Meal_ID)
 - `saveMeal` → writes rows to Saved Meals tab
-- `logMeal` → writes rows to Daily Meals tab
-- `getDailyMeals(date)` → returns meals for a given date
-- `deleteDailyMeal(date, mealId)` → removes a meal from a day
+- `logMeal` → writes rows to Daily Meals tab; no-op if the rows' `Log_ID` is already there
+- `getDailyMeals(date)` → returns meals for a given date, grouped by `Log_ID`
+- `deleteDailyMeal(date, mealId, logId?)` → removes one logging event by `logId`, or every row
+  matching date + mealId when `logId` is absent (old rows)
 - `getExercises` → returns exercise catalogue
 - `getSavedRoutines` → returns all saved routines
 - `saveRoutine` → writes rows to Saved Routines tab
-- `logWorkout` → writes rows to Daily Workouts tab
+- `logWorkout` → writes rows to Daily Workouts tab; same `Log_ID` dedupe as `logMeal`
 - `getDailyWorkout(date)` → returns workout for a given date
 - `getLastWorkoutWeights(routineId)` → returns most recent weights for a routine's exercises
 - `getObjectives` → returns all rows from the Objectives tab (flat array)
@@ -245,7 +255,10 @@ Objectives AI notes:
 - **Frontend:** GitHub Pages, auto-deployed via GitHub Actions on push to `main` (`.github/workflows/deploy.yml`)
 - **API URL:** Stored in `src/config.js` (gitignored). Injected during CI via `VITE_API_URL` GitHub Actions secret.
 - **Vite base path:** `/FitTrack/` (configured in `vite.config.js`)
-- **PWA:** `public/manifest.json` + `public/sw.js` (network-first, cache fallback for offline)
+- **PWA:** `public/manifest.json` + `public/sw.js`. Cache-first: hashed assets are served from cache
+  forever, `index.html` is served from cache and refreshed in the background. When the fresh HTML
+  differs the SW posts `update-available` and `App.jsx` shows a "New version · Reload" bar. The SW
+  stays out of the way on `localhost` so dev/HMR is unaffected.
 - **Apps Script deployment:** Must select "New version" when redeploying, or the live web app won't update.
 
 ## Key Files
@@ -256,7 +269,8 @@ Objectives AI notes:
 - `src/components/Objectives.jsx` — Objectives sub-app: short/mid/long term collapsible sections, add/score/finish/re-add/remove, per-objective steps, "About me" profile popup, "Weekly survey" button
 - `src/components/WeeklySurvey.jsx` — Weekly check-in: rates every active short/mid objective 1-5, appends one dated row each
 - `src/components/ObjectivesChat.jsx` — Goal-coach chat with starter prompts, a Sonnet/Opus toggle, and the confirm-before-write card for proposed objective edits
-- `src/api/sheets.js` — All API functions (POST to Apps Script)
+- `src/api/sheets.js` — All API functions (POST to Apps Script), plus the read cache, the write
+  outbox, the API timings ring buffer, and the cold-open gate (`afterDashboard`)
 - `src/config.js` — API_URL (gitignored, generated in CI from secret)
 - `src/data/ingredients.json` — 24 ingredients with macros (local cache)
 - `src/data/exercises.json` — 20 exercises with categories (local cache)
@@ -270,13 +284,33 @@ Objectives AI notes:
   `script.googleusercontent.com/macros/echo?user_content_key=...`; `fetch` follows it transparently,
   so `res.status` is the status of that *second* hop, which Google intermittently 404s. It is not a
   bad API URL — a wrong URL fails every time, not sometimes. `callApi()` retries any failure
-  (bad status, network error, unparsable body) up to 5 times with backoff, but **only for `get*`
-  actions**: the redirect is issued after `doPost` has already run, so retrying a write would
-  duplicate the row. Writes surface the error for a manual retry instead. Every successful read is
-  cached in `localStorage` under `fittrack_cache:<action>:<params>`; when a read's retries are
-  exhausted the cached copy is returned and a `fittrack-stale` window event shows the yellow
-  "showing last saved data" banner in `App.jsx`. List screens seed their initial state from that
-  cache via `readCache()`, so a bad request shows stale data rather than an empty screen.
+  (bad status, network error, unparsable body) up to 5 times, delays `0, 0.5, 1, 2s` (the 404 is
+  instant, so the first retry is too), but **only for `get*` actions**: the redirect is issued after
+  `doPost` has already run, so blindly retrying a write could duplicate the row. Every successful
+  read is cached in `localStorage` under `fittrack_cache:<action>:<params>`; when a read's retries
+  are exhausted the cached copy is returned and a `fittrack-stale` window event shows the yellow
+  "showing last saved data" banner in `App.jsx`.
+- **Every screen renders from cache first and refreshes in the background.** Screens seed state via
+  `readCache()` and show a small "Updating..." line rather than a spinner. The dashboard on the first
+  open of a day (no cache for that date yet) renders empty with the last known goals instead of
+  "Loading...". Sheets stays authoritative: on returning to the app after 60s+ away, `App.jsx` bumps
+  `focusKey`/`refreshKey` and every screen re-pulls, so edits from another device or made directly in
+  the Sheet show up.
+- **Write outbox.** `logMeal` and `logWorkout` are the only writes retried, and only via the outbox:
+  a transport failure (never a server rejection) is queued in `localStorage['fittrack_outbox']`,
+  `App.jsx` shows an orange "N unsent entries · Retry" bar, and `flushOutbox()` replays oldest-first on
+  start, on `online`, and on focus. Replay is safe because the server dedupes on `Log_ID`. The
+  dashboard shows queued meals for the active date alongside the server's, and deleting one just drops
+  it from the outbox. All other writes still surface their error for a manual retry.
+- **Cold open is staggered.** All five screens are mounted at once (hidden divs), so their mount
+  effects used to fire seven Apps Script calls in parallel. Now non-dashboard screens wrap their first
+  load in `afterDashboard()`, which waits for the dashboard read (or 3s). Settings only loads when its
+  tab is shown. Keep it that way when adding screens.
+- **API timings** for the last 20 calls (duration, attempts, cache fallback) are under Settings, from a
+  ring buffer `callApi` keeps in `localStorage['fittrack_timings']`.
+- **`setup()` never moves columns.** It appends any missing header after the last column, so re-running
+  it after adding a column (like `Log_ID`) is safe on tabs with data. `logMeal`/`logWorkout` also add
+  `Log_ID` themselves on first use via `ensureColumn()`, so the column appears without re-running it.
 - **Apps Script deployment versioning.** Editing code in the script editor does NOT update the live web app. Must: Manage deployments → edit → Version: "New version" → Deploy.
 - **`src/config.js` is gitignored.** The API URL is injected via the `VITE_API_URL` GitHub Actions secret during CI build. Update both local file and secret when the deployment URL changes.
 

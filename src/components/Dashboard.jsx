@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { readCache, getDashboard, deleteDailyMeal } from '../api/sheets'
+import { useState, useEffect, useMemo } from 'react'
+import { readCache, writeCache, getDashboard, deleteDailyMeal, markDashboardLoaded, readOutbox, removeOutboxWhere } from '../api/sheets'
 import SuggestMeals from './SuggestMeals'
 
 function today() {
@@ -14,6 +14,8 @@ function formatDate(dateStr) {
 export default function Dashboard({ onNavigate, refreshKey, date, onDateChange }) {
   const [meals, setMeals] = useState({})
   const [loading, setLoading] = useState(true)
+  const [updating, setUpdating] = useState(false)
+  const [outboxVersion, setOutboxVersion] = useState(0)
   const [error, setError] = useState(null)
   const [toast, setToast] = useState(null)
   const [deleting, setDeleting] = useState(null)
@@ -27,40 +29,82 @@ export default function Dashboard({ onNavigate, refreshKey, date, onDateChange }
       setMeals(cached.meals || {})
       setWorkout(cached.workout || {})
       setGoals(cached.goals)
+      setLoading(false)
+    } else if (d === today()) {
+      // First open of the day has no cache yet. "Nothing logged" is the honest state,
+      // so render it now with yesterday's goals and let the read fill it in.
+      setMeals({})
+      setWorkout({})
+      setGoals(readCache('getGoals'))
+      setLoading(false)
+    } else {
+      setMeals({})
+      setWorkout({})
+      setLoading(true)
     }
-    setLoading(!cached)
+    setUpdating(true)
     setError(null)
     getDashboard(d)
       .then(({ meals: mealsData, workout: workoutData, goals: goalsData }) => {
         setMeals(mealsData || {})
         setWorkout(workoutData || {})
         setGoals(goalsData)
+        if (goalsData) writeCache('getGoals', {}, goalsData)
       })
       .catch(err => setError(err.message))
-      .finally(() => setLoading(false))
+      .finally(() => {
+        setLoading(false)
+        setUpdating(false)
+        markDashboardLoaded()
+      })
   }
 
   useEffect(() => { loadData(date) }, [date, refreshKey])
+
+  useEffect(() => {
+    const bump = () => setOutboxVersion(v => v + 1)
+    window.addEventListener('fittrack-outbox', bump)
+    return () => window.removeEventListener('fittrack-outbox', bump)
+  }, [])
+
+  // Meals whose write is still queued are shown alongside the server's, keyed by Log_ID.
+  const queuedMeals = useMemo(() => {
+    const out = {}
+    for (const e of readOutbox()) {
+      const rows = e.action === 'logMeal' ? e.params.rows : null
+      if (rows?.[0]?.Date === date && rows[0].Log_ID) out[rows[0].Log_ID] = rows
+    }
+    return out
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [date, outboxVersion])
 
   function showToast(msg) {
     setToast(msg)
     setTimeout(() => setToast(null), 2500)
   }
 
-  async function handleDelete(mealId) {
+  async function handleDelete(key, rows) {
     if (deleting) return
     if (!confirm('Remove this meal?')) return
-    setDeleting(mealId)
+
+    if (queuedMeals[key]) {
+      // Never reached the server: dropping it from the outbox is the whole delete
+      removeOutboxWhere(e => e.action === 'logMeal' && e.params.rows?.[0]?.Log_ID === key)
+      showToast('Meal removed')
+      return
+    }
+
+    setDeleting(key)
 
     // Optimistic: remove from UI immediately
     const prev = { ...meals }
     const next = { ...meals }
-    delete next[mealId]
+    delete next[key]
     setMeals(next)
     showToast('Meal removed')
 
     try {
-      await deleteDailyMeal(date, mealId)
+      await deleteDailyMeal(date, rows[0].Meal_ID, rows[0].Log_ID || null)
     } catch {
       // Revert on failure
       setMeals(prev)
@@ -69,7 +113,7 @@ export default function Dashboard({ onNavigate, refreshKey, date, onDateChange }
     setDeleting(null)
   }
 
-  const mealEntries = Object.entries(meals)
+  const mealEntries = Object.entries({ ...meals, ...queuedMeals })
 
   const totals = mealEntries.reduce((acc, [, rows]) => {
     for (const r of rows) {
@@ -101,6 +145,7 @@ export default function Dashboard({ onNavigate, refreshKey, date, onDateChange }
         <div>
           <h1 className="text-2xl font-bold">{isToday ? 'Today' : formatDate(date)}</h1>
           {isToday && <p className="text-sm text-gray-400">{formatDate(date)}</p>}
+          {updating && !loading && <p className="text-xs text-gray-500">Updating...</p>}
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -227,7 +272,7 @@ export default function Dashboard({ onNavigate, refreshKey, date, onDateChange }
                   </p>
                 </div>
                 <button
-                  onClick={() => handleDelete(mealId)}
+                  onClick={() => handleDelete(mealId, rows)}
                   className="text-red-400 min-w-[44px] min-h-[44px] flex items-center justify-center"
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">

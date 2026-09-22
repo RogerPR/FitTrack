@@ -1,26 +1,32 @@
-import { useState, useEffect } from 'react'
-import { getGoals, saveGoals, getBodyLog, logBody, deleteBodyLog } from '../api/sheets'
+import { useState, useEffect, useRef, useMemo } from 'react'
+import { readCache, readTimings, getGoals, saveGoals, getBodyLog, logBody, deleteBodyLog } from '../api/sheets'
 
 function today() {
   return new Date().toISOString().slice(0, 10)
 }
 
-export default function Settings() {
-  const [calories, setCalories] = useState('')
-  const [protein, setProtein] = useState('')
-  const [carbs, setCarbs] = useState('')
-  const [fat, setFat] = useState('')
+export default function Settings({ active, focusKey }) {
+  const seedGoals = readCache('getGoals')
+  const [calories, setCalories] = useState(() => String(seedGoals?.Calories || ''))
+  const [protein, setProtein] = useState(() => String(seedGoals?.Protein || ''))
+  const [carbs, setCarbs] = useState(() => String(seedGoals?.Carbs || ''))
+  const [fat, setFat] = useState(() => String(seedGoals?.Fat || ''))
   const [goalsSaving, setGoalsSaving] = useState(false)
   const [goalsToast, setGoalsToast] = useState(null)
 
   const [weight, setWeight] = useState('')
   const [fatPct, setFatPct] = useState('')
   const [bodySaving, setBodySaving] = useState(false)
-  const [bodyLog, setBodyLog] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [bodyLog, setBodyLog] = useState(() => readCache('getBodyLog') || [])
+  const [loading, setLoading] = useState(() => !readCache('getBodyLog'))
+  const loadedFor = useRef(null)
   const [toast, setToast] = useState(null)
 
+  // Only fetched when the tab is actually shown, and again after a focus refresh.
   useEffect(() => {
+    if (!active) return
+    if (loadedFor.current === focusKey) return
+    loadedFor.current = focusKey
     Promise.all([getGoals(), getBodyLog()])
       .then(([goalsData, bodyData]) => {
         if (goalsData) {
@@ -33,7 +39,10 @@ export default function Settings() {
       })
       .catch(() => {})
       .finally(() => setLoading(false))
-  }, [])
+  }, [active, focusKey])
+
+  // Re-read whenever the tab is shown or a load finishes, so recent calls show up
+  const timings = useMemo(() => active ? readTimings() : [], [active, focusKey, loading])
 
   function showToast(msg) {
     setToast(msg)
@@ -175,6 +184,23 @@ export default function Settings() {
               </button>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Recent API timings — confirms where the seconds go on the real phone */}
+      {timings.length > 0 && (
+        <div className="mt-8">
+          <h2 className="text-lg font-semibold mb-2">Recent API calls</h2>
+          <div className="bg-gray-800 rounded-lg p-3 text-xs font-mono space-y-1">
+            {timings.map((t, i) => (
+              <div key={i} className="flex justify-between gap-2">
+                <span className="truncate">{t.action}</span>
+                <span className={`whitespace-nowrap ${t.cached ? 'text-yellow-400' : t.ms > 2500 ? 'text-red-400' : 'text-gray-400'}`}>
+                  {(t.ms / 1000).toFixed(1)}s{t.attempts > 1 ? ` · ${t.attempts} tries` : ''}{t.cached ? ' · cache' : ''}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

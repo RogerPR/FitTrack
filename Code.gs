@@ -12,6 +12,7 @@ function doPost(e) {
     switch (body.action) {
       case 'getDashboard':         return respond(handleGetDashboard(body));
       case 'getObjectivesBundle':  return respond(handleGetObjectivesBundle());
+      case 'getMealsBundle':       return respond(handleGetMealsBundle());
       case 'getIngredients':       return respond(handleGetIngredients());
       case 'getSavedMeals':        return respond(handleGetSavedMeals());
       case 'saveMeal':             return respond(handleSaveMeal(body));
@@ -92,22 +93,65 @@ function normalizeDate(val) {
   return String(val);
 }
 
+// One setValues call for the whole batch: one Sheets round trip instead of one per
+// row, and a multi-row log lands atomically.
 function appendRows(sheetName, rows) {
+  if (!rows || !rows.length) return;
   var sheet = getSheet(sheetName);
   var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var values = [];
   for (var i = 0; i < rows.length; i++) {
     var row = [];
     for (var j = 0; j < headers.length; j++) {
       row.push(rows[i][headers[j]] !== undefined ? rows[i][headers[j]] : '');
     }
-    sheet.appendRow(row);
+    values.push(row);
   }
+  sheet.getRange(sheet.getLastRow() + 1, 1, values.length, headers.length).setValues(values);
+}
+
+// Adds a header to the end of the header row if the tab doesn't have it yet. Never
+// moves existing columns, so it is safe on a tab that already has data.
+function ensureColumn(sheetName, header) {
+  var sheet = getSheet(sheetName);
+  var lastCol = sheet.getLastColumn();
+  var headers = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0] : [];
+  if (headers.indexOf(header) >= 0) return;
+  sheet.getRange(1, lastCol + 1).setValue(header);
+}
+
+// True if any data row has `value` in the `header` column. Reads that one column only.
+function columnHasValue(sheetName, header, value) {
+  var sheet = getSheet(sheetName);
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return false;
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var col = headers.indexOf(header);
+  if (col < 0) return false;
+  var vals = sheet.getRange(2, col + 1, lastRow - 1, 1).getValues();
+  for (var i = 0; i < vals.length; i++) {
+    if (String(vals[i][0]) === String(value)) return true;
+  }
+  return false;
 }
 
 function groupBy(rows, key) {
   var groups = {};
   for (var i = 0; i < rows.length; i++) {
     var k = rows[i][key];
+    if (!groups[k]) groups[k] = [];
+    groups[k].push(rows[i]);
+  }
+  return groups;
+}
+
+// Log rows are grouped by the logging event (Log_ID). Rows written before that column
+// existed have none, so they fall back to the old key. Deliberately means the same
+// saved meal logged twice in a day shows as two entries.
+function groupByLog(rows, fallbackKey) {
+  var groups = {};
+  for (var i = 0; i < rows.length; i++) {
+    var k = rows[i].Log_ID || rows[i][fallbackKey];
     if (!groups[k]) groups[k] = [];
     groups[k].push(rows[i]);
   }
@@ -162,10 +206,10 @@ function setup() {
   var tabs = {
     'Ingredients':     ['Name', 'Calories_100g', 'Protein_100g', 'Carbs_100g', 'Fat_100g', 'Fiber_100g'],
     'Saved Meals':     ['Meal_ID', 'Meal_Name', 'Ingredient', 'Qty_g', 'Calories', 'Protein', 'Carbs', 'Fat', 'Fiber'],
-    'Daily Meals':     ['Date', 'Meal_ID', 'Meal_Name', 'Ingredient', 'Qty_g', 'Calories', 'Protein', 'Carbs', 'Fat', 'Fiber'],
+    'Daily Meals':     ['Date', 'Meal_ID', 'Meal_Name', 'Ingredient', 'Qty_g', 'Calories', 'Protein', 'Carbs', 'Fat', 'Fiber', 'Log_ID'],
     'Exercises':       ['Name', 'Category'],
     'Saved Routines':  ['Routine_ID', 'Routine_Name', 'Exercise', 'Order'],
-    'Daily Workouts':  ['Date', 'Routine_ID', 'Routine_Name', 'Exercise', 'Set_Num', 'Reps', 'Weight_kg'],
+    'Daily Workouts':  ['Date', 'Routine_ID', 'Routine_Name', 'Exercise', 'Set_Num', 'Reps', 'Weight_kg', 'Log_ID'],
     'Goals':           ['Calories', 'Protein', 'Carbs', 'Fat'],
     'Body Log':        ['Date', 'Weight_kg', 'Fat_pct'],
     'Objectives':      ['Objective_ID', 'Term', 'Text', 'Start_Date', 'Due_Date', 'Completed', 'Score'],
@@ -174,13 +218,21 @@ function setup() {
     'Profile':         ['Text']
   };
 
+  // Headers a tab already has are left where they are; missing ones are appended after
+  // the last column. So re-running this after adding a column never shifts data.
   var names = Object.keys(tabs);
   for (var i = 0; i < names.length; i++) {
     var name = names[i];
     var sheet = ss.getSheetByName(name);
     if (!sheet) sheet = ss.insertSheet(name);
     var headers = tabs[name];
-    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    var lastCol = sheet.getLastColumn();
+    var existing = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0] : [];
+    for (var h = 0; h < headers.length; h++) {
+      if (existing.indexOf(headers[h]) >= 0) continue;
+      existing.push(headers[h]);
+      sheet.getRange(1, existing.length).setValue(headers[h]);
+    }
   }
 }
 
@@ -307,6 +359,13 @@ function handleGetObjectivesBundle() {
   } };
 }
 
+function handleGetMealsBundle() {
+  return { success: true, data: {
+    meals: handleGetSavedMeals().data,
+    counts: handleGetMealUsageCounts().data,
+  } };
+}
+
 function handleGetIngredients() {
   return { success: true, data: getSheetData('Ingredients') };
 }
@@ -321,8 +380,15 @@ function handleSaveMeal(body) {
   return { success: true, data: null };
 }
 
+// Idempotent on Log_ID: the client may replay a write whose response it never saw.
 function handleLogMeal(body) {
-  appendRows('Daily Meals', body.rows);
+  var rows = body.rows || [];
+  if (!rows.length) return { success: false, error: 'No rows provided' };
+  ensureColumn('Daily Meals', 'Log_ID');
+  if (rows[0].Log_ID && columnHasValue('Daily Meals', 'Log_ID', rows[0].Log_ID)) {
+    return { success: true, data: { duplicate: true } };
+  }
+  appendRows('Daily Meals', rows);
   return { success: true, data: null };
 }
 
@@ -334,10 +400,14 @@ function handleGetDailyMeals(body) {
       filtered.push(rows[i]);
     }
   }
-  return { success: true, data: groupBy(filtered, 'Meal_ID') };
+  return { success: true, data: groupByLog(filtered, 'Meal_ID') };
 }
 
 function handleDeleteDailyMeal(body) {
+  if (body.logId) {
+    deleteRowsWhere('Daily Meals', 'Log_ID', body.logId);
+    return { success: true, data: null };
+  }
   var sheet = getSheet('Daily Meals');
   var data = sheet.getDataRange().getValues();
   if (data.length < 2) return { success: true, data: null };
@@ -378,7 +448,13 @@ function handleSaveRoutine(body) {
 }
 
 function handleLogWorkout(body) {
-  appendRows('Daily Workouts', body.rows);
+  var rows = body.rows || [];
+  if (!rows.length) return { success: false, error: 'No rows provided' };
+  ensureColumn('Daily Workouts', 'Log_ID');
+  if (rows[0].Log_ID && columnHasValue('Daily Workouts', 'Log_ID', rows[0].Log_ID)) {
+    return { success: true, data: { duplicate: true } };
+  }
+  appendRows('Daily Workouts', rows);
   return { success: true, data: null };
 }
 
@@ -390,7 +466,7 @@ function handleGetDailyWorkout(body) {
       filtered.push(rows[i]);
     }
   }
-  return { success: true, data: groupBy(filtered, 'Routine_ID') };
+  return { success: true, data: groupByLog(filtered, 'Routine_ID') };
 }
 
 function handleGetLastWorkoutWeights(body) {

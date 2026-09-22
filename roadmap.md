@@ -238,6 +238,48 @@
 
 ---
 
+## STABILIZATION — Speed and reliability (staged)
+
+Diagnosed 2026-09-22: Google Sheets is not the bottleneck. Slow opens came from the app's own choices
+(network-first service worker, seven parallel Apps Script calls on mount, no dashboard cache on a new
+day) and from Apps Script as a transport (1-2s floor, intermittent redirect 404). Sheets must stay
+readable: the user reads it from scripts, edits it by hand, and uses the app from more than one device.
+
+### Stage 1 — DONE (2026-09-22): instant-feeling app, no lost writes, no infra change
+- Cache-first service worker with an "update available" bar
+- Cold-open reads staggered behind the dashboard; `getMealsBundle` merges two reads
+- Every screen seeds from cache; dashboard renders empty on a new day instead of a spinner
+- First 404 retry immediate; re-pull everything on returning to the app after 60s
+- `Log_ID` on Daily Meals / Daily Workouts, server-side dedupe, one `setValues` per write
+- Outbox for `logMeal` / `logWorkout` transport failures, replayed safely
+- API timings panel under Settings
+
+### Stage 2 — Cloudflare Worker + D1 behind the same API contract (when a feature needs it)
+Assumption: D1 owns the log data and the Sheet becomes a mirror; no Google Cloud project. If keeping
+every tab hand-editable matters more, use the Sheets API with a service account instead; the Worker
+layout is the same.
+- `worker/` in this repo: `wrangler.toml`, `src/index.js`, `migrations/*.sql`; deployed by a second
+  job in `.github/workflows/deploy.yml`. Secrets: `API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`,
+  `APPS_SCRIPT_URL`.
+- Same `{ action, key, ...params }` body and `{ success, data }` response, so the frontend change is
+  the `VITE_API_URL` secret. Unknown actions are proxied to Apps Script (strangler), so migration is
+  one group at a time and the app never breaks:
+  1. Daily Meals, Daily Workouts, Goals, Body Log (tables keyed by `log_id`, indexed on `date`)
+  2. Saved Meals, Saved Routines, Ingredients, Exercises
+  3. Objectives, Steps, Survey, Profile, and the LLM handlers (streaming for the coach)
+- One-off import: an `export` action in `Code.gs` dumps tabs as JSON; a Worker `import` loads them.
+- Mirror: the Worker exposes `exportTab`; an Apps Script time trigger (every 15 min) rewrites the
+  migrated tabs with `setValues`, so download scripts keep working.
+- Reverse sync for reference tabs only (Ingredients, Exercises, Saved Meals, Saved Routines), so hand
+  edits there still flow in. Log tabs become read-only in the Sheet; mark them visibly.
+- Local dev: `wrangler dev` with local D1. Free-tier limits are far above single-user volume.
+
+### Stage 3 — features that need queries
+History screen, weekly summaries, meal plans and workout suggestions read from indexed tables.
+Apps Script keeps only the mirror trigger. Rewrite the architecture section of `CLAUDE.md` then.
+
+---
+
 ## SESSION MANAGEMENT TIPS
 
 ### Starting a new Claude Code session:

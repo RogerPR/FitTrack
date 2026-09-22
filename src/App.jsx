@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { flushOutbox, readOutbox, resetDashboardGate } from './api/sheets'
 import Dashboard from './components/Dashboard'
 import LogMeal from './components/LogMeal'
 import LogWorkout from './components/LogWorkout'
@@ -94,8 +95,12 @@ export default function App() {
   const [active, setActive] = useState('dashboard')
   const [offline, setOffline] = useState(!navigator.onLine)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [focusKey, setFocusKey] = useState(0)
   const [stale, setStale] = useState(false)
+  const [updateAvailable, setUpdateAvailable] = useState(false)
+  const [outboxCount, setOutboxCount] = useState(() => readOutbox().length)
   const [activeDate, setActiveDate] = useState(today())
+  const lastFocusRefresh = useRef(Date.now())
 
   function navigateWithRefresh(tab) {
     setActive(tab)
@@ -103,19 +108,48 @@ export default function App() {
   }
 
   useEffect(() => {
-    const on = () => setOffline(false)
+    const on = () => { setOffline(false); flushOutbox() }
     const off = () => setOffline(true)
     const stale = () => setStale(true)
     const fresh = () => setStale(false)
+    // Coming back to the app after a while re-pulls every screen, so edits made on
+    // another device or directly in the Sheet show up. Throttled so tab-hopping
+    // inside the app doesn't refetch everything.
+    const visible = () => {
+      if (document.visibilityState !== 'visible') return
+      flushOutbox()
+      if (Date.now() - lastFocusRefresh.current < 60_000) return
+      lastFocusRefresh.current = Date.now()
+      resetDashboardGate()
+      setFocusKey(k => k + 1)
+      setRefreshKey(k => k + 1)
+    }
+    let prevOutbox = readOutbox().length
+    const outbox = () => {
+      const n = readOutbox().length
+      setOutboxCount(n)
+      // Everything queued just landed: refetch so the dashboard shows the server's copy
+      if (prevOutbox > 0 && n === 0) setRefreshKey(k => k + 1)
+      prevOutbox = n
+    }
+    const swMessage = (e) => { if (e.data?.type === 'update-available') setUpdateAvailable(true) }
+
     window.addEventListener('online', on)
     window.addEventListener('offline', off)
     window.addEventListener('fittrack-stale', stale)
     window.addEventListener('fittrack-fresh', fresh)
+    window.addEventListener('fittrack-outbox', outbox)
+    document.addEventListener('visibilitychange', visible)
+    navigator.serviceWorker?.addEventListener('message', swMessage)
+    flushOutbox()
     return () => {
       window.removeEventListener('online', on)
       window.removeEventListener('offline', off)
       window.removeEventListener('fittrack-stale', stale)
       window.removeEventListener('fittrack-fresh', fresh)
+      window.removeEventListener('fittrack-outbox', outbox)
+      document.removeEventListener('visibilitychange', visible)
+      navigator.serviceWorker?.removeEventListener('message', swMessage)
     }
   }, [])
 
@@ -134,11 +168,23 @@ export default function App() {
           <button onClick={() => location.reload()} className="underline font-semibold">Reload</button>
         </div>
       )}
+      {outboxCount > 0 && (
+        <div className="bg-orange-600 text-white text-center py-2 text-sm font-medium">
+          {outboxCount} unsent {outboxCount === 1 ? 'entry' : 'entries'} ·{' '}
+          <button onClick={() => flushOutbox()} className="underline font-semibold">Retry</button>
+        </div>
+      )}
+      {updateAvailable && (
+        <div className="bg-blue-600 text-white text-center py-2 text-sm font-medium">
+          New version available ·{' '}
+          <button onClick={() => location.reload()} className="underline font-semibold">Reload</button>
+        </div>
+      )}
       <div className={active === 'dashboard' ? '' : 'hidden'}><Dashboard onNavigate={setActive} refreshKey={refreshKey} date={activeDate} onDateChange={setActiveDate} /></div>
-      <div className={active === 'meal' ? '' : 'hidden'}><LogMeal onNavigate={navigateWithRefresh} date={activeDate} /></div>
-      <div className={active === 'workout' ? '' : 'hidden'}><LogWorkout date={activeDate} /></div>
-      <div className={active === 'objectives' ? '' : 'hidden'}><Objectives onNavigate={setActive} /></div>
-      <div className={active === 'more' ? '' : 'hidden'}><Settings /></div>
+      <div className={active === 'meal' ? '' : 'hidden'}><LogMeal onNavigate={navigateWithRefresh} date={activeDate} focusKey={focusKey} /></div>
+      <div className={active === 'workout' ? '' : 'hidden'}><LogWorkout date={activeDate} focusKey={focusKey} /></div>
+      <div className={active === 'objectives' ? '' : 'hidden'}><Objectives onNavigate={setActive} focusKey={focusKey} /></div>
+      <div className={active === 'more' ? '' : 'hidden'}><Settings active={active === 'more'} focusKey={focusKey} /></div>
 
       <nav className="fixed bottom-0 left-0 right-0 bg-gray-900 border-t border-gray-800 flex justify-around">
         {tabs.map(tab => (

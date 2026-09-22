@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import {
-  getObjectivesBundle, addObjective, updateObjective, deleteObjective,
+  readCache, afterDashboard, getObjectivesBundle, addObjective, updateObjective, deleteObjective,
   addObjectiveSteps, updateObjectiveStep, deleteObjectiveStep, suggestSteps, saveProfile,
 } from '../api/sheets'
 import ObjectivesChat from './ObjectivesChat'
@@ -62,9 +62,10 @@ function accent(o) {
   return 'border-l-teal-500'
 }
 
-export default function Objectives({ onNavigate }) {
-  const [objectives, setObjectives] = useState([])
-  const [loading, setLoading] = useState(true)
+export default function Objectives({ onNavigate, focusKey }) {
+  const seed = readCache('getObjectivesBundle')
+  const [objectives, setObjectives] = useState(() => seed?.objectives || [])
+  const [loading, setLoading] = useState(!seed)
   const [error, setError] = useState(null)
   const [openSections, setOpenSections] = useState({ short: false, mid: false, long: false })
   const [openCompleted, setOpenCompleted] = useState({ short: false, mid: false, long: false })
@@ -76,7 +77,7 @@ export default function Objectives({ onNavigate }) {
   const [busy, setBusy] = useState(false)
   const [toast, setToast] = useState(null)
 
-  const [steps, setSteps] = useState([])
+  const [steps, setSteps] = useState(() => seed?.steps || [])
   const [addingStepTo, setAddingStepTo] = useState(null)
   const [newStepText, setNewStepText] = useState('')
   const [editingStepId, setEditingStepId] = useState(null)
@@ -90,7 +91,7 @@ export default function Objectives({ onNavigate }) {
 
   // Free text about the user, sent to the AI as context. Held here so the chat
   // and the suggest-steps flow both pick up an edit without a reload.
-  const [profile, setProfile] = useState('')
+  const [profile, setProfile] = useState(() => seed?.profile || '')
   const [profileOpen, setProfileOpen] = useState(false)
   const [profileDraft, setProfileDraft] = useState('')
   const [savingProfile, setSavingProfile] = useState(false)
@@ -113,7 +114,7 @@ export default function Objectives({ onNavigate }) {
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { loadAll() }, [])
+  useEffect(() => { afterDashboard(loadAll) }, [focusKey])
 
   const byTerm = useMemo(() => {
     const groups = {}

@@ -1,12 +1,12 @@
 import { useState, useEffect, useMemo } from 'react'
 import exercisesData from '../data/exercises.json'
-import { readCache, getSavedRoutines, saveRoutine, logWorkout, getLastWorkoutWeights } from '../api/sheets'
+import { readCache, getSavedRoutines, saveRoutine, logWorkout, getLastWorkoutWeights, afterDashboard, newLogId } from '../api/sheets'
 
 function today() {
   return new Date().toISOString().slice(0, 10)
 }
 
-export default function LogWorkout({ date }) {
+export default function LogWorkout({ date, focusKey }) {
   const [view, setView] = useState('list') // 'list', 'create', 'log'
   const [routines, setRoutines] = useState(() => readCache('getSavedRoutines') || {})
   const [loading, setLoading] = useState(() => !readCache('getSavedRoutines'))
@@ -23,7 +23,7 @@ export default function LogWorkout({ date }) {
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { loadRoutines() }, [])
+  useEffect(() => { afterDashboard(loadRoutines) }, [focusKey])
 
   function showToast(msg) {
     setToast(msg)
@@ -262,44 +262,50 @@ function CreateRoutine({ onBack, onSaved }) {
 
 // --- Log Workout Session ---
 
+// Pre-fills each exercise's sets from the last session's rows for this routine.
+function withLastWeights(exercises, data) {
+  if (!data || data.length === 0) return exercises
+  const byExercise = {}
+  for (const row of data) {
+    if (!byExercise[row.Exercise]) byExercise[row.Exercise] = []
+    byExercise[row.Exercise].push(row)
+  }
+  return exercises.map(ex => {
+    const lastSets = byExercise[ex.name]
+    if (!lastSets) return ex
+    const sorted = [...lastSets].sort((a, b) => (a.Set_Num || 0) - (b.Set_Num || 0))
+    return {
+      ...ex,
+      sets: sorted.map(s => ({
+        reps: String(s.Reps || ''),
+        weight: String(s.Weight_kg || ''),
+      })),
+    }
+  })
+}
+
 function LogWorkoutSession({ routine, date, onBack, onSaved }) {
-  const [exercises, setExercises] = useState(
-    routine.exercises.map(name => ({
-      name,
-      sets: [{ reps: '12', weight: '' }],
-    }))
-  )
+  const seed = readCache('getLastWorkoutWeights', { routineId: routine.id })
+  const [exercises, setExercises] = useState(() => withLastWeights(
+    routine.exercises.map(name => ({ name, sets: [{ reps: '12', weight: '' }] })),
+    seed
+  ))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
-  const [loadingWeights, setLoadingWeights] = useState(true)
+  const [loadingWeights, setLoadingWeights] = useState(!seed)
   const [showAddExercise, setShowAddExercise] = useState(false)
 
-  // Pre-fill weights from last session
+  // Refresh the pre-fill from the server; skip if it matches the seed so edits made
+  // in the meantime aren't clobbered.
   useEffect(() => {
     getLastWorkoutWeights(routine.id)
       .then(data => {
-        if (!data || data.length === 0) return
-        // Group last workout data by exercise
-        const byExercise = {}
-        for (const row of data) {
-          if (!byExercise[row.Exercise]) byExercise[row.Exercise] = []
-          byExercise[row.Exercise].push(row)
-        }
-        setExercises(prev => prev.map(ex => {
-          const lastSets = byExercise[ex.name]
-          if (!lastSets) return ex
-          const sorted = lastSets.sort((a, b) => (a.Set_Num || 0) - (b.Set_Num || 0))
-          return {
-            ...ex,
-            sets: sorted.map(s => ({
-              reps: String(s.Reps || ''),
-              weight: String(s.Weight_kg || ''),
-            })),
-          }
-        }))
+        if (JSON.stringify(data) === JSON.stringify(seed)) return
+        setExercises(prev => withLastWeights(prev, data))
       })
       .catch(() => {})
       .finally(() => setLoadingWeights(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routine.id])
 
   function updateSet(exIndex, setIndex, field, value) {
@@ -347,11 +353,13 @@ function LogWorkoutSession({ routine, date, onBack, onSaved }) {
     setSaving(true)
     setError(null)
     const rows = []
+    const logId = newLogId()
     for (const ex of exercises) {
       for (let i = 0; i < ex.sets.length; i++) {
         const s = ex.sets[i]
         if (!s.reps && !s.weight) continue
         rows.push({
+          Log_ID: logId,
           Date: date,
           Routine_ID: routine.id,
           Routine_Name: routine.name,
@@ -371,6 +379,9 @@ function LogWorkoutSession({ routine, date, onBack, onSaved }) {
       await logWorkout(rows)
       onSaved()
     } catch (err) {
+      // A transport failure is queued in the outbox and replays safely (Log_ID), so
+      // from the user's side the workout is saved. Only a server rejection stays here.
+      if (err.queued) { onSaved(); return }
       setError(err.message)
       setSaving(false)
     }

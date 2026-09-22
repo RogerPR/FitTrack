@@ -1,35 +1,44 @@
 import { useState, useEffect, useMemo } from 'react'
 import { getIngredientsList, invalidateIngredientCache } from '../data/ingredientCache'
-import { readCache, getSavedMeals, saveMeal, logMeal, getMealUsageCounts, analyzeFood, describeMeal, analyzeFoodPaid, describeMealPaid, addIngredient } from '../api/sheets'
+import { readCache, getMealsBundle, getSavedMeals, saveMeal, logMeal, getMealUsageCounts, analyzeFood, describeMeal, analyzeFoodPaid, describeMealPaid, addIngredient, afterDashboard, newLogId } from '../api/sheets'
+
+// Log writes are optimistic: the screen navigates away at once and a transport failure
+// is queued in the outbox by callApi, so the .catch(() => {}) on logMeal below only
+// silences the rejection.
 
 function today() {
   return new Date().toISOString().slice(0, 10)
 }
 
-export default function LogMeal({ onNavigate, date }) {
+export default function LogMeal({ onNavigate, date, focusKey }) {
   const [view, setView] = useState('list') // 'list', 'create', 'custom', 'snap', or 'describe'
-  const [savedMeals, setSavedMeals] = useState(() => readCache('getSavedMeals') || {})
-  const [loading, setLoading] = useState(() => !readCache('getSavedMeals'))
+  const seed = readCache('getMealsBundle')
+  const [savedMeals, setSavedMeals] = useState(() => seed?.meals || readCache('getSavedMeals') || {})
+  const [loading, setLoading] = useState(() => !(seed?.meals || readCache('getSavedMeals')))
   const [error, setError] = useState(null)
   const [expandedMeal, setExpandedMeal] = useState(null)
   const [toast, setToast] = useState(null)
-  const [usageCounts, setUsageCounts] = useState(() => readCache('getMealUsageCounts') || {})
+  const [usageCounts, setUsageCounts] = useState(() => seed?.counts || readCache('getMealUsageCounts') || {})
   const [editingMeal, setEditingMeal] = useState(null)
   const [mealSearch, setMealSearch] = useState('')
 
   function loadSavedMeals() {
     setLoading(Object.keys(savedMeals).length === 0)
     setError(null)
-    Promise.all([getSavedMeals(), getMealUsageCounts().catch(() => ({}))])
-      .then(([data, counts]) => {
-        setSavedMeals(data || {})
+    getMealsBundle()
+      // Frontend deployed ahead of the new Code.gs: fall back to the two separate reads
+      .catch(err => err.message.startsWith('Unknown action')
+        ? Promise.all([getSavedMeals(), getMealUsageCounts().catch(() => ({}))]).then(([meals, counts]) => ({ meals, counts }))
+        : Promise.reject(err))
+      .then(({ meals, counts }) => {
+        setSavedMeals(meals || {})
         setUsageCounts(counts || {})
       })
       .catch(err => setError(err.message))
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { loadSavedMeals() }, [])
+  useEffect(() => { afterDashboard(loadSavedMeals) }, [focusKey])
 
   // Must stay above the early returns below — hooks can't run conditionally
   const mealEntries = useMemo(() => {
@@ -62,7 +71,9 @@ export default function LogMeal({ onNavigate, date }) {
   }
 
   async function handleLogToday(mealId, rows) {
+    const logId = newLogId()
     const logRows = rows.map(r => ({
+      Log_ID: logId,
       Date: date,
       Meal_ID: r.Meal_ID,
       Meal_Name: r.Meal_Name,
@@ -381,6 +392,7 @@ function LogIngredientForm({ onBack, onNavigate, date }) {
     const ing = qtyInput
     const mealId = 'ing_' + Date.now()
     const rows = [{
+      Log_ID: newLogId(),
       Date: date,
       Meal_ID: mealId,
       Meal_Name: ing.Name,
@@ -487,6 +499,7 @@ function CustomMealForm({ onBack, onNavigate, date }) {
     setError(null)
     const mealId = 'custom_' + Date.now()
     const rows = [{
+      Log_ID: newLogId(),
       Date: date,
       Meal_ID: mealId,
       Meal_Name: name.trim(),
@@ -682,9 +695,11 @@ function DescribeMealForm({ onBack, onNavigate, date, paid }) {
   function handleLog() {
     if (!name.trim() || items.length === 0) return
     const mealId = 'desc_' + Date.now()
+    const logId = newLogId()
     const rows = items.map(f => {
       const g = f.grams / 100
       return {
+        Log_ID: logId,
         Date: date,
         Meal_ID: mealId,
         Meal_Name: name.trim(),
@@ -877,9 +892,11 @@ function SnapMealForm({ onBack, onNavigate, date, paid }) {
   function handleLog() {
     if (!name.trim() || items.length === 0) return
     const mealId = 'snap_' + Date.now()
+    const logId = newLogId()
     const rows = items.map(f => {
       const g = f.grams / 100
       return {
+        Log_ID: logId,
         Date: date,
         Meal_ID: mealId,
         Meal_Name: name.trim(),
