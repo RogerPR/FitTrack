@@ -119,6 +119,8 @@ export default function LogWorkout({ date, focusKey }) {
 function CreateRoutine({ onBack, onSaved }) {
   const [selected, setSelected] = useState([]) // exercise names in order
   const [routineName, setRoutineName] = useState('')
+  // Minted once so a retry after a lost response is deduped server-side
+  const [routineId] = useState(() => Date.now().toString())
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
 
@@ -157,7 +159,6 @@ function CreateRoutine({ onBack, onSaved }) {
     if (!routineName.trim() || selected.length === 0) return
     setSaving(true)
     setError(null)
-    const routineId = Date.now().toString()
     const rows = selected.map((name, i) => ({
       Routine_ID: routineId,
       Routine_Name: routineName.trim(),

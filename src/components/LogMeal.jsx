@@ -1034,6 +1034,9 @@ function CreateMeal({ onBack, onSaved }) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
   const [ingredients, setIngredients] = useState([])
+  // Minted once so "Tap Save to retry" after a lost response resends the same id,
+  // which the server skips instead of saving the meal twice
+  const [mealId] = useState(() => Date.now().toString())
 
   useEffect(() => { getIngredientsList().then(setIngredients) }, [])
 
@@ -1079,7 +1082,6 @@ function CreateMeal({ onBack, onSaved }) {
     if (!mealName.trim() || added.length === 0) return
     setSaving(true)
     setError(null)
-    const mealId = Date.now().toString()
     const rows = added.map(item => ({
       Meal_ID: mealId,
       Meal_Name: mealName.trim(),

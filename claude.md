@@ -225,8 +225,8 @@ npm) and no key ever reaches the frontend.
 | Feature | Model | Notes |
 |---------|-------|-------|
 | `analyzeFood`, `describeMeal` | `gemini-2.5-flash` | Free tier |
-| `analyzeFoodPaid`, `describeMealPaid` | `claude-sonnet-4-6` | |
-| `objectivesChat`, `suggestSteps` | `claude-sonnet-5` default, `claude-opus-5` via toggle | Model choice persists in `localStorage['fittrack_ai_model']` |
+| `analyzeFoodPaid`, `describeMealPaid` | `claude-sonnet-5` | Via `callClaude()`, effort `low` |
+| `objectivesChat`, `suggestSteps` | `claude-sonnet-5` default, `claude-opus-5-5` via toggle | Model choice persists in `localStorage['fittrack_ai_model']` |
 
 Objectives AI notes:
 - `buildObjectivesContext()` in `Code.gs` renders the Profile note, then every objective, its dates,
@@ -234,8 +234,8 @@ Objectives AI notes:
   **The frontend never sends the objectives or the profile** — the backend reads the Sheet directly.
 - Overdue days are precomputed server-side rather than left for the model to derive from dates.
 - Keep adaptive thinking on and control cost with `output_config.effort` (`low` for chat, `medium`
-  for steps). Explicitly disabling thinking on Opus 5 leaks `<thinking>` tags into the reply, and is
-  a 400 at `xhigh`/`max` effort.
+  for steps). Opus 5.5 cannot disable thinking at all (400), and Sonnet 5 thinks by default, so
+  effort is the only cost lever. Opus 5.5 defaults to `medium` effort, so always set it explicitly.
 - With adaptive thinking on, `content[0]` may be a thinking block — collect the `text` blocks
   instead of indexing. `callClaude()` does this.
 - The chat is **not fitness-flavoured** — objectives are general life goals. Keep FitTrack, meals,

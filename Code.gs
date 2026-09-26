@@ -135,6 +135,21 @@ function columnHasValue(sheetName, header, value) {
   return false;
 }
 
+// Check-then-append under a lock so two concurrent copies of the same request
+// (original + outbox replay, or a retap after a 404) can't both pass the check.
+function appendOnce(sheetName, keyHeader, keyValue, rows) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    if (keyValue && columnHasValue(sheetName, keyHeader, keyValue)) return { duplicate: true };
+    appendRows(sheetName, rows);
+    SpreadsheetApp.flush();
+    return null;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function groupBy(rows, key) {
   var groups = {};
   for (var i = 0; i < rows.length; i++) {
@@ -376,8 +391,9 @@ function handleGetSavedMeals() {
 }
 
 function handleSaveMeal(body) {
-  appendRows('Saved Meals', body.rows);
-  return { success: true, data: null };
+  var rows = body.rows || [];
+  if (!rows.length) return { success: false, error: 'No rows provided' };
+  return { success: true, data: appendOnce('Saved Meals', 'Meal_ID', rows[0].Meal_ID, rows) };
 }
 
 // Idempotent on Log_ID: the client may replay a write whose response it never saw.
@@ -385,11 +401,7 @@ function handleLogMeal(body) {
   var rows = body.rows || [];
   if (!rows.length) return { success: false, error: 'No rows provided' };
   ensureColumn('Daily Meals', 'Log_ID');
-  if (rows[0].Log_ID && columnHasValue('Daily Meals', 'Log_ID', rows[0].Log_ID)) {
-    return { success: true, data: { duplicate: true } };
-  }
-  appendRows('Daily Meals', rows);
-  return { success: true, data: null };
+  return { success: true, data: appendOnce('Daily Meals', 'Log_ID', rows[0].Log_ID, rows) };
 }
 
 function handleGetDailyMeals(body) {
@@ -443,19 +455,16 @@ function handleGetSavedRoutines() {
 }
 
 function handleSaveRoutine(body) {
-  appendRows('Saved Routines', body.rows);
-  return { success: true, data: null };
+  var rows = body.rows || [];
+  if (!rows.length) return { success: false, error: 'No rows provided' };
+  return { success: true, data: appendOnce('Saved Routines', 'Routine_ID', rows[0].Routine_ID, rows) };
 }
 
 function handleLogWorkout(body) {
   var rows = body.rows || [];
   if (!rows.length) return { success: false, error: 'No rows provided' };
   ensureColumn('Daily Workouts', 'Log_ID');
-  if (rows[0].Log_ID && columnHasValue('Daily Workouts', 'Log_ID', rows[0].Log_ID)) {
-    return { success: true, data: { duplicate: true } };
-  }
-  appendRows('Daily Workouts', rows);
-  return { success: true, data: null };
+  return { success: true, data: appendOnce('Daily Workouts', 'Log_ID', rows[0].Log_ID, rows) };
 }
 
 function handleGetDailyWorkout(body) {
@@ -614,93 +623,29 @@ function handleDescribeMeal(body) {
 
 function handleAnalyzeFoodPaid(body) {
   if (!body.image) return { success: false, error: 'No image provided' };
-
-  var url = 'https://api.anthropic.com/v1/messages';
-  var payload = {
-    model: 'claude-sonnet-4-6',
-    max_tokens: 1024,
-    messages: [{
-      role: 'user',
-      content: [
-        {
-          type: 'image',
-          source: {
-            type: 'base64',
-            media_type: 'image/jpeg',
-            data: body.image
-          }
-        },
-        {
-          type: 'text',
-          text: 'You are a nutrition estimation assistant. Analyze this photo of food and estimate the nutritional content.\n\nRespond with ONLY a JSON object in this exact format:\n{\n  "name": "Short meal name",\n  "foods": [\n    {\n      "item": "Food name",\n      "grams": <estimated total grams>,\n      "calories_100g": <calories per 100g>,\n      "protein_100g": <protein grams per 100g>,\n      "carbs_100g": <carbs grams per 100g>,\n      "fat_100g": <fat grams per 100g>\n    }\n  ]\n}\nList each distinct food item separately. Round all numbers to integers. Use metric units.'
-        }
-      ]
-    }]
-  };
-
-  var res = UrlFetchApp.fetch(url, {
-    method: 'post',
-    contentType: 'application/json',
-    headers: {
-      'x-api-key': ANTHROPIC_API_KEY,
-      'anthropic-version': '2023-06-01'
-    },
-    payload: JSON.stringify(payload),
-    muteHttpExceptions: true
-  });
-
-  if (res.getResponseCode() !== 200) {
-    return { success: false, error: 'Claude API error: ' + res.getContentText().substring(0, 200) };
-  }
-
-  var result = JSON.parse(res.getContentText());
-  var text = result.content[0].text;
-  text = text.replace(/```json\s*/i, '').replace(/```\s*$/, '').trim();
-  var parsed = JSON.parse(text);
-
-  return { success: true, data: parsed };
+  return estimateMealWithClaude([
+    { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: body.image } },
+    { type: 'text', text: 'You are a nutrition estimation assistant. Analyze this photo of food and estimate the nutritional content.\n\nRespond with ONLY a JSON object in this exact format:\n{\n  "name": "Short meal name",\n  "foods": [\n    {\n      "item": "Food name",\n      "grams": <estimated total grams>,\n      "calories_100g": <calories per 100g>,\n      "protein_100g": <protein grams per 100g>,\n      "carbs_100g": <carbs grams per 100g>,\n      "fat_100g": <fat grams per 100g>\n    }\n  ]\n}\nList each distinct food item separately. Round all numbers to integers. Use metric units.' }
+  ]);
 }
 
 function handleDescribeMealPaid(body) {
   if (!body.text) return { success: false, error: 'No text provided' };
+  return estimateMealWithClaude('You are a nutrition estimation assistant. Estimate the nutritional content of the following meal description.\n\nIf the user specifies quantities, use those. If not, estimate reasonable portions.\n\nRespond with ONLY a JSON object in this exact format:\n{\n  "name": "Short meal name",\n  "foods": [\n    {\n      "item": "Food name",\n      "grams": <estimated total grams>,\n      "calories_100g": <calories per 100g>,\n      "protein_100g": <protein grams per 100g>,\n      "carbs_100g": <carbs grams per 100g>,\n      "fat_100g": <fat grams per 100g>\n    }\n  ]\n}\nList each distinct food item separately. Round all numbers to integers. Use metric units.\n\nMeal description: ' + body.text);
+}
 
-  var url = 'https://api.anthropic.com/v1/messages';
-  var payload = {
-    model: 'claude-sonnet-4-6',
-    max_tokens: 1024,
-    messages: [{
-      role: 'user',
-      content: 'You are a nutrition estimation assistant. Estimate the nutritional content of the following meal description.\n\nIf the user specifies quantities, use those. If not, estimate reasonable portions.\n\nRespond with ONLY a JSON object in this exact format:\n{\n  "name": "Short meal name",\n  "foods": [\n    {\n      "item": "Food name",\n      "grams": <estimated total grams>,\n      "calories_100g": <calories per 100g>,\n      "protein_100g": <protein grams per 100g>,\n      "carbs_100g": <carbs grams per 100g>,\n      "fat_100g": <fat grams per 100g>\n    }\n  ]\n}\nList each distinct food item separately. Round all numbers to integers. Use metric units.\n\nMeal description: ' + body.text
-    }]
-  };
-
-  var res = UrlFetchApp.fetch(url, {
-    method: 'post',
-    contentType: 'application/json',
-    headers: {
-      'x-api-key': ANTHROPIC_API_KEY,
-      'anthropic-version': '2023-06-01'
-    },
-    payload: JSON.stringify(payload),
-    muteHttpExceptions: true
-  });
-
-  if (res.getResponseCode() !== 200) {
-    return { success: false, error: 'Claude API error: ' + res.getContentText().substring(0, 200) };
-  }
-
-  var result = JSON.parse(res.getContentText());
-  var text = result.content[0].text;
-  text = text.replace(/```json\s*/i, '').replace(/```\s*$/, '').trim();
-  var parsed = JSON.parse(text);
-
-  return { success: true, data: parsed };
+// Sonnet 5 thinks by default, so this goes through callClaude (which skips thinking
+// blocks) with low effort and room for the thinking tokens ahead of the JSON.
+function estimateMealWithClaude(content) {
+  var res = callClaude('sonnet', undefined, [{ role: 'user', content: content }], 4096, 'low');
+  if (!res.ok) return { success: false, error: res.error };
+  var text = res.text.replace(/```json\s*/i, '').replace(/```\s*$/, '').trim();
+  return { success: true, data: JSON.parse(text) };
 }
 
 function handleAddIngredient(body) {
   if (!body.ingredient || !body.ingredient.Name) return { success: false, error: 'No ingredient name provided' };
-  appendRows('Ingredients', [body.ingredient]);
-  return { success: true, data: null };
+  return { success: true, data: appendOnce('Ingredients', 'Name', body.ingredient.Name, [body.ingredient]) };
 }
 
 function handleGetObjectives() {
@@ -828,7 +773,7 @@ function handleSaveProfile(body) {
 
 // --- Objectives AI ---
 
-var CLAUDE_MODELS = { sonnet: 'claude-sonnet-5', opus: 'claude-opus-5' };
+var CLAUDE_MODELS = { sonnet: 'claude-sonnet-5', opus: 'claude-opus-5-5' };
 
 function callClaude(modelKey, system, messages, maxTokens, effort, tools) {
   var payload = {

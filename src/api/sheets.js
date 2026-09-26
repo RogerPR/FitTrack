@@ -44,6 +44,14 @@ export function newLogId() {
   return 'log_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8)
 }
 
+// Log writes can be replayed from the outbox, so a caller that forgot the Log_ID
+// would otherwise get a duplicate on every replay.
+function withLogId(rows) {
+  if (!rows?.length || rows[0].Log_ID) return rows
+  const id = newLogId()
+  return rows.map(r => ({ ...r, Log_ID: id }))
+}
+
 // --- Timings ring buffer (shown under Settings) ---
 
 function recordTiming(action, ms, attempts, cached) {
@@ -203,13 +211,13 @@ export const getMealsBundle = () => callApi('getMealsBundle')
 export const getIngredients = () => callApi('getIngredients')
 export const getSavedMeals = () => callApi('getSavedMeals')
 export const saveMeal = (rows) => callApi('saveMeal', { rows })
-export const logMeal = (rows) => callApi('logMeal', { rows })
+export const logMeal = (rows) => callApi('logMeal', { rows: withLogId(rows) })
 export const getDailyMeals = (date) => callApi('getDailyMeals', { date })
 export const deleteDailyMeal = (date, mealId, logId) => callApi('deleteDailyMeal', { date, mealId, logId })
 export const getExercises = () => callApi('getExercises')
 export const getSavedRoutines = () => callApi('getSavedRoutines')
 export const saveRoutine = (rows) => callApi('saveRoutine', { rows })
-export const logWorkout = (rows) => callApi('logWorkout', { rows })
+export const logWorkout = (rows) => callApi('logWorkout', { rows: withLogId(rows) })
 export const getDailyWorkout = (date) => callApi('getDailyWorkout', { date })
 export const getLastWorkoutWeights = (routineId) => callApi('getLastWorkoutWeights', { routineId })
 export const getGoals = () => callApi('getGoals')
