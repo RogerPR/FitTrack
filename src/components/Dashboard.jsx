@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { readCache, writeCache, getDashboard, deleteDailyMeal, markDashboardLoaded, readOutbox, removeOutboxWhere } from '../api/sheets'
+import { readCache, writeCache, getDashboard, deleteDailyMeal, markDashboardLoaded, readOutbox, removeOutboxWhere, markOutboxConfirmed, outboxId, outboxDate } from '../api/sheets'
 import SuggestMeals from './SuggestMeals'
 
 function today() {
@@ -50,6 +50,11 @@ export default function Dashboard({ onNavigate, refreshKey, date, onDateChange }
         setWorkout(workoutData || {})
         setGoals(goalsData)
         if (goalsData) writeCache('getGoals', {}, goalsData)
+        // Acknowledged outbox entries the server now returns can go. A deployment that
+        // doesn't write Log_ID yet returns none, so then every acknowledged one goes.
+        const groups = [...Object.values(mealsData || {}), ...Object.values(workoutData || {})]
+        const ids = groups.map(rows => rows[0]?.Log_ID).filter(Boolean)
+        markOutboxConfirmed(d, ids.length ? new Set(ids) : null)
       })
       .catch(err => setError(err.message))
       .finally(() => {
@@ -67,16 +72,29 @@ export default function Dashboard({ onNavigate, refreshKey, date, onDateChange }
     return () => window.removeEventListener('fittrack-outbox', bump)
   }, [])
 
-  // Meals whose write is still queued are shown alongside the server's, keyed by Log_ID.
-  const queuedMeals = useMemo(() => {
-    const out = {}
+  // Outbox entries for this date (pending, unsent, or acknowledged but not yet returned
+  // by a read) are shown alongside the server's, keyed by Log_ID so the two copies
+  // collapse into one once the server returns it.
+  const queued = useMemo(() => {
+    const out = { meals: {}, workout: {}, status: {} }
     for (const e of readOutbox()) {
-      const rows = e.action === 'logMeal' ? e.params.rows : null
-      if (rows?.[0]?.Date === date && rows[0].Log_ID) out[rows[0].Log_ID] = rows
+      const id = outboxId(e)
+      if (!id || outboxDate(e) !== date) continue
+      const bucket = e.action === 'logMeal' ? out.meals : e.action === 'logWorkout' ? out.workout : null
+      if (!bucket) continue
+      bucket[id] = e.params.rows
+      out.status[id] = e.sent ? 'sent' : e.failed ? 'unsent' : 'saving'
     }
     return out
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [date, outboxVersion])
+
+  function statusTag(key) {
+    const s = queued.status[key]
+    if (s === 'saving') return <span className="text-xs text-gray-500 ml-2">saving…</span>
+    if (s === 'unsent') return <span className="text-xs text-orange-400 ml-2">unsent</span>
+    return null
+  }
 
   function showToast(msg) {
     setToast(msg)
@@ -87,11 +105,12 @@ export default function Dashboard({ onNavigate, refreshKey, date, onDateChange }
     if (deleting) return
     if (!confirm('Remove this meal?')) return
 
-    if (queuedMeals[key]) {
-      // Never reached the server: dropping it from the outbox is the whole delete
-      removeOutboxWhere(e => e.action === 'logMeal' && e.params.rows?.[0]?.Log_ID === key)
-      showToast('Meal removed')
-      return
+    if (queued.meals[key]) {
+      const status = queued.status[key]
+      removeOutboxWhere(e => outboxId(e) === key)
+      // Not acknowledged: the server never had it, dropping it is the whole delete
+      if (status !== 'sent') { showToast('Meal removed'); return }
+      // Acknowledged: fall through to the server delete by Log_ID
     }
 
     setDeleting(key)
@@ -113,7 +132,8 @@ export default function Dashboard({ onNavigate, refreshKey, date, onDateChange }
     setDeleting(null)
   }
 
-  const mealEntries = Object.entries({ ...meals, ...queuedMeals })
+  const mealEntries = Object.entries({ ...meals, ...queued.meals })
+  const workoutEntries = Object.entries({ ...workout, ...queued.workout })
 
   const totals = mealEntries.reduce((acc, [, rows]) => {
     for (const r of rows) {
@@ -266,7 +286,7 @@ export default function Dashboard({ onNavigate, refreshKey, date, onDateChange }
             <div key={mealId} className="bg-gray-800 rounded-lg p-4">
               <div className="flex justify-between items-start">
                 <div>
-                  <p className="font-semibold">{name}</p>
+                  <p className="font-semibold">{name}{statusTag(mealId)}</p>
                   <p className="text-sm text-gray-400 mt-1">
                     {Math.round(mealTotals.calories)} cal &middot; {Math.round(mealTotals.protein)}g P &middot; {Math.round(mealTotals.carbs)}g C &middot; {Math.round(mealTotals.fat)}g F
                   </p>
@@ -288,7 +308,6 @@ export default function Dashboard({ onNavigate, refreshKey, date, onDateChange }
 
       {/* Today's workout */}
       {(() => {
-        const workoutEntries = Object.entries(workout)
         if (workoutEntries.length === 0 && !loading) return null
         return (
           <>
@@ -307,7 +326,7 @@ export default function Dashboard({ onNavigate, refreshKey, date, onDateChange }
               }
               return (
                 <div key={routineId} className="bg-gray-800 rounded-lg p-4 mb-3">
-                  <p className="font-semibold text-purple-400 mb-2">{name}</p>
+                  <p className="font-semibold text-purple-400 mb-2">{name}{statusTag(routineId)}</p>
                   {Object.entries(byExercise).map(([exercise, sets]) => (
                     <div key={exercise} className="mb-2">
                       <p className="text-sm font-medium">{exercise}</p>

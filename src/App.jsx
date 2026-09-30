@@ -98,14 +98,9 @@ export default function App() {
   const [focusKey, setFocusKey] = useState(0)
   const [stale, setStale] = useState(false)
   const [updateAvailable, setUpdateAvailable] = useState(false)
-  const [outboxCount, setOutboxCount] = useState(() => readOutbox().length)
+  const [outboxFailed, setOutboxFailed] = useState(() => readOutbox().filter(e => e.failed))
   const [activeDate, setActiveDate] = useState(today())
   const lastFocusRefresh = useRef(Date.now())
-
-  function navigateWithRefresh(tab) {
-    setActive(tab)
-    if (tab === 'dashboard') setRefreshKey(k => k + 1)
-  }
 
   useEffect(() => {
     const on = () => { setOffline(false); flushOutbox() }
@@ -124,13 +119,16 @@ export default function App() {
       setFocusKey(k => k + 1)
       setRefreshKey(k => k + 1)
     }
-    let prevOutbox = readOutbox().length
+    const unsentCount = () => readOutbox().filter(e => !e.sent).length
+    let prevUnsent = unsentCount()
     const outbox = () => {
-      const n = readOutbox().length
-      setOutboxCount(n)
-      // Everything queued just landed: refetch so the dashboard shows the server's copy
-      if (prevOutbox > 0 && n === 0) setRefreshKey(k => k + 1)
-      prevOutbox = n
+      const list = readOutbox()
+      setOutboxFailed(list.filter(e => e.failed))
+      // The last pending write was acknowledged: refetch so the dashboard picks up the
+      // server's copy and markOutboxConfirmed() can drop the queued one
+      const n = unsentCount()
+      if (prevUnsent > 0 && n === 0) setRefreshKey(k => k + 1)
+      prevUnsent = n
     }
     const swMessage = (e) => { if (e.data?.type === 'update-available') setUpdateAvailable(true) }
 
@@ -168,10 +166,15 @@ export default function App() {
           <button onClick={() => location.reload()} className="underline font-semibold">Reload</button>
         </div>
       )}
-      {outboxCount > 0 && (
+      {outboxFailed.length > 0 && (
         <div className="bg-orange-600 text-white text-center py-2 text-sm font-medium">
-          {outboxCount} unsent {outboxCount === 1 ? 'entry' : 'entries'} ·{' '}
+          {outboxFailed.length} unsent {outboxFailed.length === 1 ? 'entry' : 'entries'} ·{' '}
           <button onClick={() => flushOutbox()} className="underline font-semibold">Retry</button>
+          {outboxFailed.find(e => e.error) && (
+            <span className="block text-xs font-normal opacity-90">
+              Last error: {outboxFailed.find(e => e.error).error}
+            </span>
+          )}
         </div>
       )}
       {updateAvailable && (
@@ -181,7 +184,7 @@ export default function App() {
         </div>
       )}
       <div className={active === 'dashboard' ? '' : 'hidden'}><Dashboard onNavigate={setActive} refreshKey={refreshKey} date={activeDate} onDateChange={setActiveDate} /></div>
-      <div className={active === 'meal' ? '' : 'hidden'}><LogMeal onNavigate={navigateWithRefresh} date={activeDate} focusKey={focusKey} /></div>
+      <div className={active === 'meal' ? '' : 'hidden'}><LogMeal onNavigate={setActive} date={activeDate} focusKey={focusKey} /></div>
       <div className={active === 'workout' ? '' : 'hidden'}><LogWorkout date={activeDate} focusKey={focusKey} /></div>
       <div className={active === 'objectives' ? '' : 'hidden'}><Objectives onNavigate={setActive} focusKey={focusKey} /></div>
       <div className={active === 'more' ? '' : 'hidden'}><Settings active={active === 'more'} focusKey={focusKey} /></div>

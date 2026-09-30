@@ -296,12 +296,21 @@ Objectives AI notes:
   "Loading...". Sheets stays authoritative: on returning to the app after 60s+ away, `App.jsx` bumps
   `focusKey`/`refreshKey` and every screen re-pulls, so edits from another device or made directly in
   the Sheet show up.
-- **Write outbox.** `logMeal` and `logWorkout` are the only writes retried, and only via the outbox:
-  a transport failure (never a server rejection) is queued in `localStorage['fittrack_outbox']`,
-  `App.jsx` shows an orange "N unsent entries · Retry" bar, and `flushOutbox()` replays oldest-first on
-  start, on `online`, and on focus. Replay is safe because the server dedupes on `Log_ID`. The
-  dashboard shows queued meals for the active date alongside the server's, and deleting one just drops
-  it from the outbox. All other writes still surface their error for a manual retry.
+- **Write outbox is pending-first.** `logMeal` and `logWorkout` go into `localStorage['fittrack_outbox']`
+  *before* they are sent, keyed by `Log_ID`, and stay there until a dashboard read returns them. Entry
+  states: pending (in flight, dashboard tag "saving…"), `failed` (transport failure or server rejection
+  with `error`; tag "unsent", orange "N unsent entries · Retry" bar in `App.jsx`), `sent` (acknowledged;
+  dropped by `markOutboxConfirmed()` after the next read for that date). `flushOutbox()` replays every
+  non-`sent` entry oldest-first on start, on `online`, on focus and on Retry, skipping ones in flight.
+  Replay is only safe because the server dedupes on `Log_ID` — **a new Daily Meals row without a
+  `Log_ID` means the live Apps Script deployment is stale, and every replay will duplicate rows.**
+  Failed entries are never dropped automatically; deleting one from the dashboard removes it. A
+  `sent` entry deleted from the dashboard also goes through `deleteDailyMeal` by `Log_ID`. All other
+  writes still surface their error for a manual retry.
+- **`removeDuplicateLogRows(dryRun)` in `Code.gs`** cleans replay duplicates from the Sheet (rows
+  identical on every column, only for per-log IDs `ing_/desc_/snap_/custom_`, any row with a `Log_ID`,
+  and workouts). Run it from the script editor: no argument logs what it would delete;
+  `removeDuplicateLogRows(false)` deletes. Saved-meal re-logs are never touched.
 - **Cold open is staggered.** All five screens are mounted at once (hidden divs), so their mount
   effects used to fire seven Apps Script calls in parallel. Now non-dashboard screens wrap their first
   load in `afterDashboard()`, which waits for the dashboard read (or 3s). Settings only loads when its

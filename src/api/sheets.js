@@ -7,9 +7,9 @@ import { API_URL } from '../config.js'
 //
 // Writes are not retried in place: by the time the redirect is issued the script has
 // already run, so a blind retry could duplicate the row. Log writes carry a Log_ID the
-// server dedupes on, which makes them safe to replay, so a transport failure on
-// logMeal/logWorkout is queued in an outbox and flushed later. Other writes surface
-// the error for a manual retry.
+// server dedupes on, which makes them safe to replay, so logMeal/logWorkout go through
+// an outbox (see below) and are replayed until the server acknowledges them. Other
+// writes surface the error for a manual retry.
 const MAX_ATTEMPTS = 5
 const RETRY_DELAYS = [0, 500, 1000, 2000]
 const OUTBOX_KEY = 'fittrack_outbox'
@@ -73,6 +73,16 @@ export function readTimings() {
 }
 
 // --- Outbox ---
+//
+// Every log write lives here from the moment it is requested until a server read has
+// returned it, so the dashboard can show it at once and keep showing it while the
+// (slow) write and the following read complete. Entry states, keyed by Log_ID:
+//   pending — being sent right now (no flag)
+//   failed  — transport failure or server rejection (`error` set); replayed by
+//             flushOutbox() / the Retry bar. Never dropped automatically: the user can
+//             delete it from the dashboard.
+//   sent    — acknowledged by the server; dropped by markOutboxConfirmed() once a read
+//             for its date includes it.
 
 export function readOutbox() {
   try {
@@ -91,30 +101,78 @@ function writeOutbox(list) {
   window.dispatchEvent(new Event('fittrack-outbox'))
 }
 
+export function outboxId(entry) {
+  return entry.params?.rows?.[0]?.Log_ID
+}
+
+export function outboxDate(entry) {
+  return entry.params?.rows?.[0]?.Date
+}
+
 function enqueue(action, params) {
-  writeOutbox([...readOutbox(), { action, params, ts: Date.now() }])
+  const id = params.rows?.[0]?.Log_ID
+  const list = readOutbox()
+  if (list.some(e => outboxId(e) === id)) return
+  writeOutbox([...list, { action, params, ts: Date.now() }])
+}
+
+function patchOutbox(id, patch) {
+  writeOutbox(readOutbox().map(e => outboxId(e) === id ? { ...e, ...patch } : e))
 }
 
 export function removeOutboxWhere(pred) {
   writeOutbox(readOutbox().filter(e => !pred(e)))
 }
 
+// Drops acknowledged entries for `date` that the server now returns. `presentIds` is
+// the set of Log_IDs in the fresh read; null means the server doesn't return Log_IDs
+// (stale deployment), in which case every acknowledged entry for the date is dropped.
+export function markOutboxConfirmed(date, presentIds) {
+  removeOutboxWhere(e => e.sent && outboxDate(e) === date && (!presentIds || presentIds.has(outboxId(e))))
+}
+
+const inFlight = new Set()
+
+async function sendLogged(action, params) {
+  const id = params.rows?.[0]?.Log_ID
+  enqueue(action, params)
+  // A replay starts out as pending again, so the dashboard tag and the Retry bar
+  // reflect the attempt in progress rather than the previous failure
+  patchOutbox(id, { failed: false, error: undefined })
+  inFlight.add(id)
+  const t0 = performance.now()
+  try {
+    const data = await rawRequest(action, params)
+    patchOutbox(id, { sent: true, failed: false, error: undefined })
+    recordTiming(action, performance.now() - t0, 1, false)
+    return data
+  } catch (err) {
+    patchOutbox(id, { failed: true, error: err.final ? err.message : undefined })
+    recordTiming(action, performance.now() - t0, 1, false)
+    // A transport failure will be replayed, so from the caller's side it is saved.
+    // A server rejection stays visible as unsent and is reported to the caller.
+    if (!err.final) err.queued = true
+    throw err
+  } finally {
+    inFlight.delete(id)
+  }
+}
+
 let flushing = false
 
-// Replays queued writes oldest first. Stops at the first failure so order is kept.
+// Replays unacknowledged entries oldest first. A transport failure stops the pass (the
+// network is down, later entries would fail too); a server rejection moves on.
 export async function flushOutbox() {
   if (flushing || !navigator.onLine) return
   flushing = true
   try {
-    while (readOutbox().length > 0) {
-      const entry = readOutbox()[0]
+    for (const entry of readOutbox()) {
+      if (entry.sent || inFlight.has(outboxId(entry))) continue
       try {
-        await rawRequest(entry.action, entry.params)
+        await sendLogged(entry.action, entry.params)
       } catch (err) {
         if (!err.final) break
-        // The server saw it and rejected it; replaying won't help, drop it
       }
-      writeOutbox(readOutbox().slice(1))
     }
   } finally {
     flushing = false
@@ -166,6 +224,7 @@ async function rawRequest(action, params) {
 }
 
 async function callApi(action, params = {}) {
+  if (OUTBOX_ACTIONS.has(action)) return sendLogged(action, params)
   const isRead = action.startsWith('get')
   const t0 = performance.now()
 
@@ -184,10 +243,6 @@ async function callApi(action, params = {}) {
         throw err
       }
       if (!isRead) {
-        if (OUTBOX_ACTIONS.has(action)) {
-          enqueue(action, params)
-          err.queued = true
-        }
         recordTiming(action, performance.now() - t0, attempt + 1, false)
         throw err
       }

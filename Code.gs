@@ -139,7 +139,9 @@ function columnHasValue(sheetName, header, value) {
 // (original + outbox replay, or a retap after a 404) can't both pass the check.
 function appendOnce(sheetName, keyHeader, keyValue, rows) {
   var lock = LockService.getScriptLock();
-  lock.waitLock(20000);
+  // Bounded wait: a stuck lock surfaces as a named rejection the client keeps and
+  // retries later, instead of a generic error after 20s.
+  if (!lock.tryLock(10000)) throw new Error('Sheet busy, try again');
   try {
     if (keyValue && columnHasValue(sheetName, keyHeader, keyValue)) return { duplicate: true };
     appendRows(sheetName, rows);
@@ -211,6 +213,57 @@ function deleteRowsWhere(sheetName, header, value) {
     }
   }
   return count;
+}
+
+// --- One-off cleanup (run from the script editor) ---
+//
+// Removes rows duplicated by outbox replays against a backend that didn't dedupe on
+// Log_ID yet. A row is only a candidate when its logging event can't legitimately repeat:
+// meals whose Meal_ID was minted per log (ing_/desc_/snap_/custom_), any row with a
+// Log_ID, and every workout row. Within those, a row identical to an earlier one on
+// every column is a replay copy. Saved-meal re-logs (numeric Meal_ID, e.g. three
+// coffees) are never touched. Default is a dry run that only logs; pass false to delete.
+function removeDuplicateLogRows(dryRun) {
+  if (dryRun === undefined) dryRun = true;
+  var targets = [
+    { sheet: 'Daily Meals', idHeader: 'Meal_ID', prefixes: ['ing_', 'desc_', 'snap_', 'custom_'] },
+    { sheet: 'Daily Workouts', idHeader: 'Routine_ID', prefixes: null }
+  ];
+  var total = 0;
+  for (var t = 0; t < targets.length; t++) {
+    var target = targets[t];
+    var sheet = getSheet(target.sheet);
+    if (!sheet) continue;
+    var data = sheet.getDataRange().getValues();
+    if (data.length < 2) continue;
+    var headers = data[0];
+    var idCol = headers.indexOf(target.idHeader);
+    var logCol = headers.indexOf('Log_ID');
+    var seen = {};
+    var toDelete = [];
+    for (var i = 1; i < data.length; i++) {
+      var id = String(data[i][idCol] || '');
+      var hasLogId = logCol >= 0 && String(data[i][logCol] || '') !== '';
+      var eligible = hasLogId || !target.prefixes;
+      if (!eligible && target.prefixes) {
+        for (var p = 0; p < target.prefixes.length; p++) {
+          if (id.indexOf(target.prefixes[p]) === 0) { eligible = true; break; }
+        }
+      }
+      if (!eligible) continue;
+      var key = data[i].map(function (v) { return String(v); }).join('\u0001');
+      if (seen[key]) toDelete.push({ row: i + 1, keep: seen[key], label: [normalizeDate(data[i][0]), id, data[i][2], data[i][3]].join(' | ') });
+      else seen[key] = i + 1;
+    }
+    Logger.log('%s: %s duplicate row(s)%s', target.sheet, toDelete.length, dryRun ? ' (dry run, nothing deleted)' : '');
+    for (var d = toDelete.length - 1; d >= 0; d--) {
+      Logger.log('  row %s is a copy of row %s (kept): %s', toDelete[d].row, toDelete[d].keep, toDelete[d].label);
+      if (!dryRun) sheet.deleteRow(toDelete[d].row);
+    }
+    total += toDelete.length;
+  }
+  Logger.log('Total: %s', total);
+  return total;
 }
 
 // --- Setup (run once) ---
