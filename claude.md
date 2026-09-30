@@ -310,7 +310,7 @@ Objectives AI notes:
 - **`removeDuplicateLogRows(dryRun)` in `Code.gs`** cleans replay duplicates from the Sheet (rows
   identical on every column, only for per-log IDs `ing_/desc_/snap_/custom_`, any row with a `Log_ID`,
   and workouts). Run it from the script editor: no argument logs what it would delete;
-  `removeDuplicateLogRows(false)` deletes. Saved-meal re-logs are never touched.
+  `removeDuplicateLogRowsNow()` (the Run button can't pass arguments) deletes. Saved-meal re-logs are never touched.
 - **Cold open is staggered.** All five screens are mounted at once (hidden divs), so their mount
   effects used to fire seven Apps Script calls in parallel. Now non-dashboard screens wrap their first
   load in `afterDashboard()`, which waits for the dashboard read (or 3s). Settings only loads when its

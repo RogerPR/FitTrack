@@ -266,6 +266,11 @@ function removeDuplicateLogRows(dryRun) {
   return total;
 }
 
+// The editor's Run button can't pass arguments: select this one to actually delete.
+function removeDuplicateLogRowsNow() {
+  return removeDuplicateLogRows(false);
+}
+
 // --- Setup (run once) ---
 
 function setup() {
