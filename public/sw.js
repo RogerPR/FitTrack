@@ -42,7 +42,10 @@ async function staleWhileRevalidate(event, notifyOnChange) {
   const cache = await caches.open(CACHE_NAME)
   const hit = await cache.match(request)
 
-  const refresh = fetch(request)
+  // Revalidate with the server, not the HTTP cache: GitHub Pages sends index.html with
+  // max-age=600, so a plain fetch would keep seeing the old shell for 10 minutes after
+  // a deploy and the "new version" bar would never appear.
+  const refresh = fetch(request.url, { cache: 'no-cache' })
     .then(async res => {
       if (!res.ok) return res
       if (notifyOnChange && hit) {
