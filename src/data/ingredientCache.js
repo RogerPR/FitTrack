@@ -1,4 +1,4 @@
-import { getIngredients } from '../api/sheets'
+import { getIngredients, readCache, writeCache } from '../api/sheets'
 import fallbackData from './ingredients.json'
 
 let cached = null
@@ -10,6 +10,13 @@ function dedupe(list) {
     seen.add(item.Name)
     return true
   })
+}
+
+// What a screen renders at once: the last list from the Sheet, or the bundled one.
+// Never waits on the network - getIngredientsList() refreshes in the background.
+export function readIngredientsNow() {
+  const stored = readCache('getIngredients')
+  return dedupe(stored && stored.length > 0 ? stored : fallbackData)
 }
 
 export function getIngredientsList() {
@@ -26,3 +33,10 @@ export function getIngredientsList() {
 }
 
 export function invalidateIngredientCache() { cached = null }
+
+// A just-added ingredient is searchable immediately rather than after the next read.
+export function rememberIngredient(ing) {
+  const list = readIngredientsNow().filter(i => i.Name !== ing.Name)
+  writeCache('getIngredients', {}, [...list, ing])
+  invalidateIngredientCache()
+}

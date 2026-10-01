@@ -196,7 +196,7 @@ export default function Settings({ active, focusKey }) {
               <div key={i} className="flex justify-between gap-2">
                 <span className="truncate">{t.action}</span>
                 <span className={`whitespace-nowrap ${t.cached ? 'text-yellow-400' : t.ms > 2500 ? 'text-red-400' : 'text-gray-400'}`}>
-                  {(t.ms / 1000).toFixed(1)}s{t.attempts > 1 ? ` · ${t.attempts} tries` : ''}{t.cached ? ' · cache' : ''}
+                  {(t.ms / 1000).toFixed(1)}s{t.attempts > 1 ? ` · ${t.attempts} tries` : ''}{t.cached ? ' · cache' : ''}{t.error ? ` · ${t.error}` : ''}
                 </span>
               </div>
             ))}

@@ -1,4 +1,3 @@
-var SPREADSHEET_ID = SpreadsheetApp.getActiveSpreadsheet().getId();
 var API_KEY = ''; // Set this to your password
 var GEMINI_API_KEY = 'your-gemini-api-key-here';
 var ANTHROPIC_API_KEY = 'your-anthropic-api-key-here';
@@ -64,20 +63,26 @@ function respond(data) {
 
 // --- Helpers ---
 
+// Every call into SpreadsheetApp is a round trip, so the spreadsheet handle is kept for
+// the execution and readers ask for the smallest range that answers the question.
+var _ss = null;
+
 function getSheet(name) {
-  return SpreadsheetApp.getActiveSpreadsheet().getSheetByName(name);
+  if (!_ss) _ss = SpreadsheetApp.getActiveSpreadsheet();
+  return _ss.getSheetByName(name);
 }
 
-function getSheetData(name) {
-  var sheet = getSheet(name);
-  var data = sheet.getDataRange().getValues();
-  if (data.length < 2) return [];
-  var headers = data[0];
+function readHeaders(sheet) {
+  var lastCol = sheet.getLastColumn();
+  return lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0] : [];
+}
+
+function toObjects(headers, values) {
   var rows = [];
-  for (var i = 1; i < data.length; i++) {
+  for (var i = 0; i < values.length; i++) {
     var obj = {};
     for (var j = 0; j < headers.length; j++) {
-      var val = data[i][j];
+      var val = values[i][j];
       if (val && typeof val.getTime === 'function') val = normalizeDate(val);
       obj[headers[j]] = val;
     }
@@ -86,19 +91,75 @@ function getSheetData(name) {
   return rows;
 }
 
+// Whole tab as objects. Fine for the reference tabs; the log tabs go through
+// readColumns + readRowBlock instead so a day's read doesn't scale with history.
+function getSheetData(name) {
+  var data = getSheet(name).getDataRange().getValues();
+  if (data.length < 2) return [];
+  return toObjects(data[0], data.slice(1));
+}
+
+// The named columns of a tab, rows 2..lastRow, as { Header: [values] }. One range
+// read per column; the sheet, headers and lastRow come back for a follow-up block read.
+function readColumns(sheetName, wanted) {
+  var sheet = getSheet(sheetName);
+  var headers = sheet ? readHeaders(sheet) : [];
+  var lastRow = sheet ? sheet.getLastRow() : 0;
+  var cols = {};
+  for (var w = 0; w < wanted.length; w++) {
+    var idx = headers.indexOf(wanted[w]);
+    var list = [];
+    if (idx >= 0 && lastRow >= 2) {
+      var vals = sheet.getRange(2, idx + 1, lastRow - 1, 1).getValues();
+      for (var i = 0; i < vals.length; i++) list.push(vals[i][0]);
+    }
+    cols[wanted[w]] = list;
+  }
+  return { sheet: sheet, headers: headers, lastRow: lastRow, cols: cols };
+}
+
+// Objects for a contiguous row range (1-based sheet row numbers, inclusive).
+function readRowBlock(t, firstRow, lastRow) {
+  var values = t.sheet.getRange(firstRow, 1, lastRow - firstRow + 1, t.headers.length).getValues();
+  return toObjects(t.headers, values);
+}
+
+// Rows of a log tab for one date: scan the Date column, then read only the block
+// between the first and last match. A day's rows sit together at the bottom, so the
+// block is small; rows inserted by hand elsewhere just widen it and are re-filtered.
+function rowsForDate(sheetName, date) {
+  var t = readColumns(sheetName, ['Date']);
+  var dates = t.cols.Date;
+  var first = -1, last = -1;
+  for (var i = 0; i < dates.length; i++) {
+    if (normalizeDate(dates[i]) !== date) continue;
+    if (first < 0) first = i;
+    last = i;
+  }
+  if (first < 0) return [];
+  var rows = readRowBlock(t, first + 2, last + 2);
+  var out = [];
+  for (var j = 0; j < rows.length; j++) {
+    if (rows[j].Date === date) out.push(rows[j]);
+  }
+  return out;
+}
+
+// yyyy-MM-dd from a Sheets Date with no service calls. V8 Date getters run in the
+// script's time zone, so this matches what Utilities.formatDate gave, minus a round
+// trip per cell - that was seconds per read on the log tabs.
 function normalizeDate(val) {
   if (val && typeof val.getTime === 'function') {
-    return Utilities.formatDate(val, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    var m = val.getMonth() + 1, d = val.getDate();
+    return val.getFullYear() + '-' + (m < 10 ? '0' : '') + m + '-' + (d < 10 ? '0' : '') + d;
   }
   return String(val);
 }
 
 // One setValues call for the whole batch: one Sheets round trip instead of one per
 // row, and a multi-row log lands atomically.
-function appendRows(sheetName, rows) {
+function appendValues(sheet, headers, lastRow, rows) {
   if (!rows || !rows.length) return;
-  var sheet = getSheet(sheetName);
-  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   var values = [];
   for (var i = 0; i < rows.length; i++) {
     var row = [];
@@ -107,27 +168,18 @@ function appendRows(sheetName, rows) {
     }
     values.push(row);
   }
-  sheet.getRange(sheet.getLastRow() + 1, 1, values.length, headers.length).setValues(values);
+  sheet.getRange(lastRow + 1, 1, values.length, headers.length).setValues(values);
 }
 
-// Adds a header to the end of the header row if the tab doesn't have it yet. Never
-// moves existing columns, so it is safe on a tab that already has data.
-function ensureColumn(sheetName, header) {
+function appendRows(sheetName, rows) {
   var sheet = getSheet(sheetName);
-  var lastCol = sheet.getLastColumn();
-  var headers = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0] : [];
-  if (headers.indexOf(header) >= 0) return;
-  sheet.getRange(1, lastCol + 1).setValue(header);
+  appendValues(sheet, readHeaders(sheet), sheet.getLastRow(), rows);
 }
 
 // True if any data row has `value` in the `header` column. Reads that one column only.
-function columnHasValue(sheetName, header, value) {
-  var sheet = getSheet(sheetName);
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return false;
-  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+function columnHasValue(sheet, headers, lastRow, header, value) {
   var col = headers.indexOf(header);
-  if (col < 0) return false;
+  if (col < 0 || lastRow < 2) return false;
   var vals = sheet.getRange(2, col + 1, lastRow - 1, 1).getValues();
   for (var i = 0; i < vals.length; i++) {
     if (String(vals[i][0]) === String(value)) return true;
@@ -143,8 +195,11 @@ function appendOnce(sheetName, keyHeader, keyValue, rows) {
   // retries later, instead of a generic error after 20s.
   if (!lock.tryLock(10000)) throw new Error('Sheet busy, try again');
   try {
-    if (keyValue && columnHasValue(sheetName, keyHeader, keyValue)) return { duplicate: true };
-    appendRows(sheetName, rows);
+    var sheet = getSheet(sheetName);
+    var headers = readHeaders(sheet);
+    var lastRow = sheet.getLastRow();
+    if (keyValue && columnHasValue(sheet, headers, lastRow, keyHeader, keyValue)) return { duplicate: true };
+    appendValues(sheet, headers, lastRow, rows);
     SpreadsheetApp.flush();
     return null;
   } finally {
@@ -197,18 +252,12 @@ function updateRowById(sheetName, idHeader, id, fields) {
 
 // Deletes every row whose header column matches value. Bottom-to-top to avoid index shifting.
 function deleteRowsWhere(sheetName, header, value) {
-  var sheet = getSheet(sheetName);
-  if (!sheet) return 0;
-  var data = sheet.getDataRange().getValues();
-  if (data.length < 2) return 0;
-
-  var col = data[0].indexOf(header);
-  if (col < 0) return 0;
-
+  var t = readColumns(sheetName, [header]);
+  var vals = t.cols[header];
   var count = 0;
-  for (var i = data.length - 1; i >= 1; i--) {
-    if (String(data[i][col]) === String(value)) {
-      sheet.deleteRow(i + 1);
+  for (var i = vals.length - 1; i >= 0; i--) {
+    if (String(vals[i]) === String(value)) {
+      t.sheet.deleteRow(i + 2);
       count++;
     }
   }
@@ -458,19 +507,11 @@ function handleSaveMeal(body) {
 function handleLogMeal(body) {
   var rows = body.rows || [];
   if (!rows.length) return { success: false, error: 'No rows provided' };
-  ensureColumn('Daily Meals', 'Log_ID');
   return { success: true, data: appendOnce('Daily Meals', 'Log_ID', rows[0].Log_ID, rows) };
 }
 
 function handleGetDailyMeals(body) {
-  var rows = getSheetData('Daily Meals');
-  var filtered = [];
-  for (var i = 0; i < rows.length; i++) {
-    if (normalizeDate(rows[i].Date) === body.date) {
-      filtered.push(rows[i]);
-    }
-  }
-  return { success: true, data: groupByLog(filtered, 'Meal_ID') };
+  return { success: true, data: groupByLog(rowsForDate('Daily Meals', body.date), 'Meal_ID') };
 }
 
 function handleDeleteDailyMeal(body) {
@@ -478,28 +519,14 @@ function handleDeleteDailyMeal(body) {
     deleteRowsWhere('Daily Meals', 'Log_ID', body.logId);
     return { success: true, data: null };
   }
-  var sheet = getSheet('Daily Meals');
-  var data = sheet.getDataRange().getValues();
-  if (data.length < 2) return { success: true, data: null };
-
-  var headers = data[0];
-  var dateCol = headers.indexOf('Date');
-  var mealIdCol = headers.indexOf('Meal_ID');
-
-  var rowsToDelete = [];
-  for (var i = 1; i < data.length; i++) {
-    var rowDate = normalizeDate(data[i][dateCol]);
-    var rowMealId = String(data[i][mealIdCol]);
-    if (rowDate === body.date && rowMealId === String(body.mealId)) {
-      rowsToDelete.push(i + 1);
+  var t = readColumns('Daily Meals', ['Date', 'Meal_ID']);
+  var dates = t.cols.Date, ids = t.cols.Meal_ID;
+  // Delete bottom-to-top to avoid index shifting
+  for (var i = dates.length - 1; i >= 0; i--) {
+    if (normalizeDate(dates[i]) === body.date && String(ids[i]) === String(body.mealId)) {
+      t.sheet.deleteRow(i + 2);
     }
   }
-
-  // Delete bottom-to-top to avoid index shifting
-  for (var j = rowsToDelete.length - 1; j >= 0; j--) {
-    sheet.deleteRow(rowsToDelete[j]);
-  }
-
   return { success: true, data: null };
 }
 
@@ -521,46 +548,38 @@ function handleSaveRoutine(body) {
 function handleLogWorkout(body) {
   var rows = body.rows || [];
   if (!rows.length) return { success: false, error: 'No rows provided' };
-  ensureColumn('Daily Workouts', 'Log_ID');
   return { success: true, data: appendOnce('Daily Workouts', 'Log_ID', rows[0].Log_ID, rows) };
 }
 
 function handleGetDailyWorkout(body) {
-  var rows = getSheetData('Daily Workouts');
-  var filtered = [];
-  for (var i = 0; i < rows.length; i++) {
-    if (normalizeDate(rows[i].Date) === body.date) {
-      filtered.push(rows[i]);
-    }
-  }
-  return { success: true, data: groupByLog(filtered, 'Routine_ID') };
+  return { success: true, data: groupByLog(rowsForDate('Daily Workouts', body.date), 'Routine_ID') };
 }
 
+// The routine's most recent session: two columns to find the date, one block read.
 function handleGetLastWorkoutWeights(body) {
-  var rows = getSheetData('Daily Workouts');
-  var matching = [];
-  for (var i = 0; i < rows.length; i++) {
-    if (String(rows[i].Routine_ID) === String(body.routineId)) {
-      matching.push(rows[i]);
-    }
-  }
-
-  if (matching.length === 0) return { success: true, data: [] };
-
-  // Find the most recent date
+  var t = readColumns('Daily Workouts', ['Date', 'Routine_ID']);
+  var dates = t.cols.Date, ids = t.cols.Routine_ID;
   var latestDate = '';
-  for (var j = 0; j < matching.length; j++) {
-    var d = normalizeDate(matching[j].Date);
+  for (var i = 0; i < ids.length; i++) {
+    if (String(ids[i]) !== String(body.routineId)) continue;
+    var d = normalizeDate(dates[i]);
     if (d > latestDate) latestDate = d;
   }
+  if (!latestDate) return { success: true, data: [] };
 
+  var first = -1, last = -1;
+  for (var j = 0; j < ids.length; j++) {
+    if (String(ids[j]) !== String(body.routineId) || normalizeDate(dates[j]) !== latestDate) continue;
+    if (first < 0) first = j;
+    last = j;
+  }
+  var rows = readRowBlock(t, first + 2, last + 2);
   var result = [];
-  for (var k = 0; k < matching.length; k++) {
-    if (normalizeDate(matching[k].Date) === latestDate) {
-      result.push(matching[k]);
+  for (var k = 0; k < rows.length; k++) {
+    if (String(rows[k].Routine_ID) === String(body.routineId) && rows[k].Date === latestDate) {
+      result.push(rows[k]);
     }
   }
-
   return { success: true, data: result };
 }
 
@@ -601,14 +620,15 @@ function handleLogBody(body) {
 }
 
 function handleGetMealUsageCounts() {
-  var rows = getSheetData('Daily Meals');
+  var t = readColumns('Daily Meals', ['Date', 'Meal_ID']);
+  var dates = t.cols.Date, ids = t.cols.Meal_ID;
   var seen = {};
   var counts = {};
-  for (var i = 0; i < rows.length; i++) {
-    var key = normalizeDate(rows[i].Date) + '|' + rows[i].Meal_ID;
+  for (var i = 0; i < ids.length; i++) {
+    var key = normalizeDate(dates[i]) + '|' + ids[i];
     if (!seen[key]) {
       seen[key] = true;
-      var mid = String(rows[i].Meal_ID);
+      var mid = String(ids[i]);
       counts[mid] = (counts[mid] || 0) + 1;
     }
   }

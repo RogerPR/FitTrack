@@ -254,6 +254,19 @@ readable: the user reads it from scripts, edits it by hand, and uses the app fro
 - Outbox for `logMeal` / `logWorkout` transport failures, replayed safely
 - API timings panel under Settings
 
+### Stage 1b — DONE (2026-10-01): the backend was the bottleneck after all
+Measured: Apps Script floor 2.3s per call, but every call over Daily Meals / Daily Workouts cost
+7–35s (once 210s when calls queued) for a 26-byte answer — `getSheetData()` made a service call per
+date cell and every day-read scanned the whole history. Stage 1 then multiplied those reads (focus
+refresh of four screens, read-back after every log, 5× retries), which is why it got worse.
+- `Code.gs`: pure-JS `normalizeDate()`, `readColumns()` + `readRowBlock()` for the log tabs, write
+  path trimmed to ~11 Sheets calls (was ~22 plus a per-cell scan). Verified byte-identical output
+  against the old code on a 1 750-row fake sheet; dashboard read 3 878 → 20 service calls.
+- Client: ingredient list seeds from cache, an acknowledged log is merged into the dashboard cache
+  instead of re-read, focus refresh only re-pulls the visible tab, deduped writes retry like reads.
+- Next decision: re-measure with the curl loop. If ~2.5–3s per (background) call is still too
+  slow, Stage 2 is the only lever left.
+
 ### Stage 2 — Cloudflare Worker + D1 behind the same API contract (when a feature needs it)
 Assumption: D1 owns the log data and the Sheet becomes a mirror; no Google Cloud project. If keeping
 every tab hand-editable matters more, use the Sheets API with a service account instead; the Worker

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import exercisesData from '../data/exercises.json'
 import { readCache, getSavedRoutines, saveRoutine, logWorkout, getLastWorkoutWeights, afterDashboard, newLogId } from '../api/sheets'
 
@@ -6,7 +6,7 @@ function today() {
   return new Date().toISOString().slice(0, 10)
 }
 
-export default function LogWorkout({ date, focusKey }) {
+export default function LogWorkout({ date, focusKey, active }) {
   const [view, setView] = useState('list') // 'list', 'create', 'log'
   const [routines, setRoutines] = useState(() => readCache('getSavedRoutines') || {})
   const [loading, setLoading] = useState(() => !readCache('getSavedRoutines'))
@@ -23,7 +23,16 @@ export default function LogWorkout({ date, focusKey }) {
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { afterDashboard(loadRoutines) }, [focusKey])
+  // Cold open prefetches behind the dashboard; a later focus refresh only re-pulls the
+  // screen being shown, the rest catch up when next opened.
+  const loadedFor = useRef(null)
+  useEffect(() => {
+    if (loadedFor.current === focusKey) return
+    if (focusKey > 0 && !active) return
+    loadedFor.current = focusKey
+    afterDashboard(loadRoutines)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusKey, active])
 
   function showToast(msg) {
     setToast(msg)

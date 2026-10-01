@@ -14,6 +14,9 @@ const MAX_ATTEMPTS = 5
 const RETRY_DELAYS = [0, 500, 1000, 2000]
 const OUTBOX_KEY = 'fittrack_outbox'
 const OUTBOX_ACTIONS = new Set(['logMeal', 'logWorkout'])
+// Writes the server dedupes on their own id (appendOnce in Code.gs), so a lost
+// response can be retried in place like a read.
+const IDEMPOTENT_ACTIONS = new Set(['saveMeal', 'saveRoutine', 'addIngredient'])
 const TIMINGS_KEY = 'fittrack_timings'
 const TIMINGS_MAX = 20
 
@@ -54,10 +57,10 @@ function withLogId(rows) {
 
 // --- Timings ring buffer (shown under Settings) ---
 
-function recordTiming(action, ms, attempts, cached) {
+function recordTiming(action, ms, attempts, cached, error) {
   try {
     const list = JSON.parse(localStorage.getItem(TIMINGS_KEY) || '[]')
-    list.unshift({ action, ms: Math.round(ms), attempts, cached, at: Date.now() })
+    list.unshift({ action, ms: Math.round(ms), attempts, cached, error: error || undefined, at: Date.now() })
     localStorage.setItem(TIMINGS_KEY, JSON.stringify(list.slice(0, TIMINGS_MAX)))
   } catch {
     // best effort
@@ -74,15 +77,15 @@ export function readTimings() {
 
 // --- Outbox ---
 //
-// Every log write lives here from the moment it is requested until a server read has
-// returned it, so the dashboard can show it at once and keep showing it while the
-// (slow) write and the following read complete. Entry states, keyed by Log_ID:
+// Every log write lives here from the moment it is requested until the server
+// acknowledges it, so the dashboard can show it at once. Entry states, keyed by Log_ID:
 //   pending — being sent right now (no flag)
 //   failed  — transport failure or server rejection (`error` set); replayed by
 //             flushOutbox() / the Retry bar. Never dropped automatically: the user can
 //             delete it from the dashboard.
-//   sent    — acknowledged by the server; dropped by markOutboxConfirmed() once a read
-//             for its date includes it.
+// On acknowledgement the rows are merged into the cached dashboard for their date and
+// the entry is dropped. No read-back: the write *is* the confirmation, and the next
+// focus refresh reconciles with the Sheet anyway.
 
 export function readOutbox() {
   try {
@@ -124,11 +127,30 @@ export function removeOutboxWhere(pred) {
   writeOutbox(readOutbox().filter(e => !pred(e)))
 }
 
-// Drops acknowledged entries for `date` that the server now returns. `presentIds` is
-// the set of Log_IDs in the fresh read; null means the server doesn't return Log_IDs
-// (stale deployment), in which case every acknowledged entry for the date is dropped.
-export function markOutboxConfirmed(date, presentIds) {
-  removeOutboxWhere(e => e.sent && outboxDate(e) === date && (!presentIds || presentIds.has(outboxId(e))))
+// Puts acknowledged rows into the cached dashboard for their date, keyed by Log_ID
+// like the server's own grouping, so the dashboard re-renders from cache with the
+// entry in its final place and no extra read is needed.
+function mergeIntoDashboardCache(action, rows) {
+  const date = rows?.[0]?.Date
+  const id = rows?.[0]?.Log_ID
+  if (!date || !id) return
+  const cached = readCache('getDashboard', { date }) || { meals: {}, workout: {}, goals: readCache('getGoals') }
+  const bucket = action === 'logMeal' ? 'meals' : 'workout'
+  cached[bucket] = { ...(cached[bucket] || {}), [id]: rows }
+  writeCache('getDashboard', { date }, cached)
+}
+
+// Removes one logging event from the cached dashboard after a delete.
+export function dropFromDashboardCache(date, key) {
+  const cached = readCache('getDashboard', { date })
+  if (!cached) return
+  for (const bucket of ['meals', 'workout']) {
+    if (cached[bucket]?.[key]) {
+      cached[bucket] = { ...cached[bucket] }
+      delete cached[bucket][key]
+    }
+  }
+  writeCache('getDashboard', { date }, cached)
 }
 
 const inFlight = new Set()
@@ -143,12 +165,13 @@ async function sendLogged(action, params) {
   const t0 = performance.now()
   try {
     const data = await rawRequest(action, params)
-    patchOutbox(id, { sent: true, failed: false, error: undefined })
+    mergeIntoDashboardCache(action, params.rows)
+    removeOutboxWhere(e => outboxId(e) === id)
     recordTiming(action, performance.now() - t0, 1, false)
     return data
   } catch (err) {
     patchOutbox(id, { failed: true, error: err.final ? err.message : undefined })
-    recordTiming(action, performance.now() - t0, 1, false)
+    recordTiming(action, performance.now() - t0, 1, false, err.message)
     // A transport failure will be replayed, so from the caller's side it is saved.
     // A server rejection stays visible as unsent and is reported to the caller.
     if (!err.final) err.queued = true
@@ -167,7 +190,7 @@ export async function flushOutbox() {
   flushing = true
   try {
     for (const entry of readOutbox()) {
-      if (entry.sent || inFlight.has(outboxId(entry))) continue
+      if (inFlight.has(outboxId(entry))) continue
       try {
         await sendLogged(entry.action, entry.params)
       } catch (err) {
@@ -226,6 +249,7 @@ async function rawRequest(action, params) {
 async function callApi(action, params = {}) {
   if (OUTBOX_ACTIONS.has(action)) return sendLogged(action, params)
   const isRead = action.startsWith('get')
+  const canRetry = isRead || IDEMPOTENT_ACTIONS.has(action)
   const t0 = performance.now()
 
   for (let attempt = 0; ; attempt++) {
@@ -238,21 +262,18 @@ async function callApi(action, params = {}) {
       recordTiming(action, performance.now() - t0, attempt + 1, false)
       return data
     } catch (err) {
-      if (err.final) {
-        recordTiming(action, performance.now() - t0, attempt + 1, false)
+      const last = attempt >= MAX_ATTEMPTS - 1
+      if (err.final || !canRetry || (last && !isRead)) {
+        recordTiming(action, performance.now() - t0, attempt + 1, false, err.message)
         throw err
       }
-      if (!isRead) {
-        recordTiming(action, performance.now() - t0, attempt + 1, false)
-        throw err
-      }
-      if (attempt < MAX_ATTEMPTS - 1) {
+      if (!last) {
         const delay = RETRY_DELAYS[Math.min(attempt, RETRY_DELAYS.length - 1)]
         if (delay) await new Promise(r => setTimeout(r, delay))
         continue
       }
       const cached = readCache(action, params)
-      recordTiming(action, performance.now() - t0, attempt + 1, cached !== null)
+      recordTiming(action, performance.now() - t0, attempt + 1, cached !== null, err.message)
       if (cached === null) throw err
       window.dispatchEvent(new Event('fittrack-stale'))
       return cached

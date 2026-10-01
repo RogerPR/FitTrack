@@ -278,6 +278,15 @@ Objectives AI notes:
 
 ## Known Gotchas
 - **Apps Script `instanceof Date` is broken.** `getValues()` returns Date objects that fail `instanceof Date`. Use `typeof val.getTime === 'function'` instead.
+- **Never call a service per cell.** `Session.getScriptTimeZone()` / `Utilities.formatDate()` are
+  round trips; called once per Date cell they cost seconds per read on the log tabs (measured
+  2026-10-01: 7–35s for an empty day). `normalizeDate()` builds `yyyy-MM-dd` from the V8 Date
+  getters, which already run in the script's time zone. Keep it that way.
+- **Log tabs are read columns-first, block-second.** `getSheetData()` (whole tab) is only for the
+  small reference tabs. Anything over Daily Meals / Daily Workouts goes through `readColumns()` (the
+  one or two columns the query filters on) and then `readRowBlock()` for the first..last matching
+  row — see `rowsForDate()`. A day's read is then ~20 Sheets calls regardless of history, instead
+  of thousands.
 - **`setup()` must be re-run after adding a Sheets tab.** It is idempotent and won't touch existing data, but a missing tab surfaces as a runtime error on the first read.
 - **Long-term objectives have no `Due_Date`.** `daysUntil()` returns `null` for an empty date rather than `NaN`; anything rendering a due date or urgency colour must branch on it.
 - **Intermittent HTTP 404 on API calls.** A POST to `/exec` is answered with a 302 to
@@ -285,8 +294,10 @@ Objectives AI notes:
   so `res.status` is the status of that *second* hop, which Google intermittently 404s. It is not a
   bad API URL — a wrong URL fails every time, not sometimes. `callApi()` retries any failure
   (bad status, network error, unparsable body) up to 5 times, delays `0, 0.5, 1, 2s` (the 404 is
-  instant, so the first retry is too), but **only for `get*` actions**: the redirect is issued after
-  `doPost` has already run, so blindly retrying a write could duplicate the row. Every successful
+  instant, so the first retry is too), but **only for `get*` actions and `IDEMPOTENT_ACTIONS`**
+  (`saveMeal`, `saveRoutine`, `addIngredient`, which `appendOnce()` dedupes on their own id): the
+  redirect is issued after `doPost` has already run, so blindly retrying any other write could
+  duplicate the row. Every successful
   read is cached in `localStorage` under `fittrack_cache:<action>:<params>`; when a read's retries
   are exhausted the cached copy is returned and a `fittrack-stale` window event shows the yellow
   "showing last saved data" banner in `App.jsx`.
@@ -294,19 +305,26 @@ Objectives AI notes:
   `readCache()` and show a small "Updating..." line rather than a spinner. The dashboard on the first
   open of a day (no cache for that date yet) renders empty with the last known goals instead of
   "Loading...". Sheets stays authoritative: on returning to the app after 60s+ away, `App.jsx` bumps
-  `focusKey`/`refreshKey` and every screen re-pulls, so edits from another device or made directly in
-  the Sheet show up.
-- **Write outbox is pending-first.** `logMeal` and `logWorkout` go into `localStorage['fittrack_outbox']`
-  *before* they are sent, keyed by `Log_ID`, and stay there until a dashboard read returns them. Entry
-  states: pending (in flight, dashboard tag "saving…"), `failed` (transport failure or server rejection
-  with `error`; tag "unsent", orange "N unsent entries · Retry" bar in `App.jsx`), `sent` (acknowledged;
-  dropped by `markOutboxConfirmed()` after the next read for that date). `flushOutbox()` replays every
-  non-`sent` entry oldest-first on start, on `online`, on focus and on Retry, skipping ones in flight.
-  Replay is only safe because the server dedupes on `Log_ID` — **a new Daily Meals row without a
-  `Log_ID` means the live Apps Script deployment is stale, and every replay will duplicate rows.**
-  Failed entries are never dropped automatically; deleting one from the dashboard removes it. A
-  `sent` entry deleted from the dashboard also goes through `deleteDailyMeal` by `Log_ID`. All other
-  writes still surface their error for a manual retry.
+  `focusKey`/`refreshKey`; the dashboard and the **visible** tab re-pull at once and the other
+  screens re-pull when next shown (`loadedFor` ref vs `focusKey` in each screen), so edits from
+  another device or made directly in the Sheet show up without a four-wide burst of executions.
+- **Write outbox is pending-first, and the write is the confirmation.** `logMeal` and `logWorkout`
+  go into `localStorage['fittrack_outbox']` *before* they are sent, keyed by `Log_ID`. Entry states:
+  pending (in flight, dashboard tag "saving…"), `failed` (transport failure or server rejection with
+  `error`; tag "unsent", orange "N unsent entries · Retry" bar in `App.jsx`). On acknowledgement
+  `sendLogged()` merges the rows into `fittrack_cache:getDashboard:{date}` under their `Log_ID`
+  (`mergeIntoDashboardCache`) and drops the entry; the dashboard re-seeds from cache on the
+  `fittrack-outbox` event. **No read-back after a write** — that was one more full execution per
+  log; the next focus refresh reconciles with the Sheet. `flushOutbox()` replays every entry
+  oldest-first on start, on `online`, on focus and on Retry, skipping ones in flight. Replay is only
+  safe because the server dedupes on `Log_ID` — **a new Daily Meals row without a `Log_ID` means the
+  live Apps Script deployment is stale, and every replay will duplicate rows.** Failed entries are
+  never dropped automatically; deleting one from the dashboard removes it. Deleting an acknowledged
+  entry goes through `deleteDailyMeal` by `Log_ID` and `dropFromDashboardCache()`. All other writes
+  still surface their error for a manual retry.
+- **The ingredient list never waits on the network.** `readIngredientsNow()` (localStorage copy or
+  the bundled JSON) seeds Create Meal / Log Ingredient / Suggest Meals; `getIngredientsList()` only
+  refreshes in the background, and `rememberIngredient()` puts a just-added one into the cache.
 - **`removeDuplicateLogRows(dryRun)` in `Code.gs`** cleans replay duplicates from the Sheet (rows
   identical on every column, only for per-log IDs `ing_/desc_/snap_/custom_`, any row with a `Log_ID`,
   and workouts). Run it from the script editor: no argument logs what it would delete;
@@ -315,11 +333,13 @@ Objectives AI notes:
   effects used to fire seven Apps Script calls in parallel. Now non-dashboard screens wrap their first
   load in `afterDashboard()`, which waits for the dashboard read (or 3s). Settings only loads when its
   tab is shown. Keep it that way when adding screens.
-- **API timings** for the last 20 calls (duration, attempts, cache fallback) are under Settings, from a
-  ring buffer `callApi` keeps in `localStorage['fittrack_timings']`.
+- **API timings** for the last 20 calls (duration, attempts, cache fallback, last error) are under
+  Settings, from a ring buffer `callApi` keeps in `localStorage['fittrack_timings']`. The Apps
+  Script floor is ~2.3s per call (2026-10-01); anything well above it is a slow execution, not the
+  network.
 - **`setup()` never moves columns.** It appends any missing header after the last column, so re-running
-  it after adding a column (like `Log_ID`) is safe on tabs with data. `logMeal`/`logWorkout` also add
-  `Log_ID` themselves on first use via `ensureColumn()`, so the column appears without re-running it.
+  it after adding a column (like `Log_ID`) is safe on tabs with data. Adding a column therefore means:
+  add it to `setup()`, re-run `setup()`, then deploy the code that writes it.
 - **Apps Script deployment versioning.** Editing code in the script editor does NOT update the live web app. Must: Manage deployments → edit → Version: "New version" → Deploy.
 - **`src/config.js` is gitignored.** The API URL is injected via the `VITE_API_URL` GitHub Actions secret during CI build. Update both local file and secret when the deployment URL changes.
 

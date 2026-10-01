@@ -119,17 +119,7 @@ export default function App() {
       setFocusKey(k => k + 1)
       setRefreshKey(k => k + 1)
     }
-    const unsentCount = () => readOutbox().filter(e => !e.sent).length
-    let prevUnsent = unsentCount()
-    const outbox = () => {
-      const list = readOutbox()
-      setOutboxFailed(list.filter(e => e.failed))
-      // The last pending write was acknowledged: refetch so the dashboard picks up the
-      // server's copy and markOutboxConfirmed() can drop the queued one
-      const n = unsentCount()
-      if (prevUnsent > 0 && n === 0) setRefreshKey(k => k + 1)
-      prevUnsent = n
-    }
+    const outbox = () => setOutboxFailed(readOutbox().filter(e => e.failed))
     const swMessage = (e) => { if (e.data?.type === 'update-available') setUpdateAvailable(true) }
 
     window.addEventListener('online', on)
@@ -184,9 +174,9 @@ export default function App() {
         </div>
       )}
       <div className={active === 'dashboard' ? '' : 'hidden'}><Dashboard onNavigate={setActive} refreshKey={refreshKey} date={activeDate} onDateChange={setActiveDate} /></div>
-      <div className={active === 'meal' ? '' : 'hidden'}><LogMeal onNavigate={setActive} date={activeDate} focusKey={focusKey} /></div>
-      <div className={active === 'workout' ? '' : 'hidden'}><LogWorkout date={activeDate} focusKey={focusKey} /></div>
-      <div className={active === 'objectives' ? '' : 'hidden'}><Objectives onNavigate={setActive} focusKey={focusKey} /></div>
+      <div className={active === 'meal' ? '' : 'hidden'}><LogMeal onNavigate={setActive} date={activeDate} focusKey={focusKey} active={active === 'meal'} /></div>
+      <div className={active === 'workout' ? '' : 'hidden'}><LogWorkout date={activeDate} focusKey={focusKey} active={active === 'workout'} /></div>
+      <div className={active === 'objectives' ? '' : 'hidden'}><Objectives onNavigate={setActive} focusKey={focusKey} active={active === 'objectives'} /></div>
       <div className={active === 'more' ? '' : 'hidden'}><Settings active={active === 'more'} focusKey={focusKey} /></div>
 
       <nav className="fixed bottom-0 left-0 right-0 bg-gray-900 border-t border-gray-800 flex justify-around">

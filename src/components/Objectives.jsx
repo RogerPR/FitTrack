@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import {
   readCache, afterDashboard, getObjectivesBundle, addObjective, updateObjective, deleteObjective,
   addObjectiveSteps, updateObjectiveStep, deleteObjectiveStep, suggestSteps, saveProfile,
@@ -62,7 +62,7 @@ function accent(o) {
   return 'border-l-teal-500'
 }
 
-export default function Objectives({ onNavigate, focusKey }) {
+export default function Objectives({ onNavigate, focusKey, active }) {
   const seed = readCache('getObjectivesBundle')
   const [objectives, setObjectives] = useState(() => seed?.objectives || [])
   const [loading, setLoading] = useState(!seed)
@@ -114,7 +114,15 @@ export default function Objectives({ onNavigate, focusKey }) {
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { afterDashboard(loadAll) }, [focusKey])
+  // Cold open prefetches behind the dashboard; a later focus refresh only re-pulls the
+  // screen being shown, the rest catch up when next opened.
+  const loadedFor = useRef(null)
+  useEffect(() => {
+    if (loadedFor.current === focusKey) return
+    if (focusKey > 0 && !active) return
+    loadedFor.current = focusKey
+    afterDashboard(loadAll)
+  }, [focusKey, active])
 
   const byTerm = useMemo(() => {
     const groups = {}

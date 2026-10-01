@@ -1,6 +1,6 @@
-import { useState, useEffect, useMemo } from 'react'
-import { getIngredientsList, invalidateIngredientCache } from '../data/ingredientCache'
-import { readCache, getMealsBundle, getSavedMeals, saveMeal, logMeal, getMealUsageCounts, analyzeFood, describeMeal, analyzeFoodPaid, describeMealPaid, addIngredient, afterDashboard, newLogId } from '../api/sheets'
+import { useState, useEffect, useMemo, useRef } from 'react'
+import { getIngredientsList, readIngredientsNow, rememberIngredient } from '../data/ingredientCache'
+import { readCache, writeCache, getMealsBundle, getSavedMeals, saveMeal, logMeal, getMealUsageCounts, analyzeFood, describeMeal, analyzeFoodPaid, describeMealPaid, addIngredient, afterDashboard, newLogId } from '../api/sheets'
 
 // Log writes are optimistic: the screen navigates away at once and a transport failure
 // is queued in the outbox by callApi, so the .catch(() => {}) on logMeal below only
@@ -10,7 +10,7 @@ function today() {
   return new Date().toISOString().slice(0, 10)
 }
 
-export default function LogMeal({ onNavigate, date, focusKey }) {
+export default function LogMeal({ onNavigate, date, focusKey, active }) {
   const [view, setView] = useState('list') // 'list', 'create', 'custom', 'snap', or 'describe'
   const seed = readCache('getMealsBundle')
   const [savedMeals, setSavedMeals] = useState(() => seed?.meals || readCache('getSavedMeals') || {})
@@ -38,7 +38,16 @@ export default function LogMeal({ onNavigate, date, focusKey }) {
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { afterDashboard(loadSavedMeals) }, [focusKey])
+  // Cold open prefetches behind the dashboard; a later focus refresh only re-pulls the
+  // screen being shown, the rest catch up when next opened.
+  const loadedFor = useRef(null)
+  useEffect(() => {
+    if (loadedFor.current === focusKey) return
+    if (focusKey > 0 && !active) return
+    loadedFor.current = focusKey
+    afterDashboard(loadSavedMeals)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusKey, active])
 
   // Must stay above the early returns below — hooks can't run conditionally
   const mealEntries = useMemo(() => {
@@ -64,9 +73,16 @@ export default function LogMeal({ onNavigate, date, focusKey }) {
     setTimeout(() => setToast(null), 2500)
   }
 
-  function handleMealSaved() {
+  // The new meal goes into the list and the cache at once; the bundle read that follows
+  // only confirms it.
+  function handleMealSaved(rows) {
     showToast('Meal saved!')
     setView('list')
+    if (rows?.length) {
+      const next = { ...savedMeals, [rows[0].Meal_ID]: rows }
+      setSavedMeals(next)
+      writeCache('getMealsBundle', {}, { meals: next, counts: usageCounts })
+    }
     loadSavedMeals()
   }
 
@@ -366,7 +382,7 @@ function LogIngredientForm({ onBack, onNavigate, date }) {
   const [search, setSearch] = useState('')
   const [qtyInput, setQtyInput] = useState(null)
   const [qtyValue, setQtyValue] = useState('100')
-  const [ingredients, setIngredients] = useState([])
+  const [ingredients, setIngredients] = useState(() => readIngredientsNow())
 
   useEffect(() => { getIngredientsList().then(setIngredients) }, [])
 
@@ -517,14 +533,15 @@ function CustomMealForm({ onBack, onNavigate, date }) {
       if (saveAsIngredient) {
         const sz = parseFloat(servingSize)
         const toP100 = (v) => Math.round((parseFloat(v) || 0) * (100 / sz))
-        addIngredient({
+        const ingredient = {
           Name: name.trim(),
           Calories_100g: toP100(calories),
           Protein_100g: toP100(protein),
           Carbs_100g: toP100(carbs),
           Fat_100g: toP100(fat),
           Fiber_100g: 0,
-        }).then(() => invalidateIngredientCache()).catch(() => {})
+        }
+        addIngredient(ingredient).then(() => rememberIngredient(ingredient)).catch(() => {})
       }
     } catch (err) {
       setError(err.message)
@@ -1033,7 +1050,7 @@ function CreateMeal({ onBack, onSaved }) {
   const [mealName, setMealName] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
-  const [ingredients, setIngredients] = useState([])
+  const [ingredients, setIngredients] = useState(() => readIngredientsNow())
   // Minted once so "Tap Save to retry" after a lost response resends the same id,
   // which the server skips instead of saving the meal twice
   const [mealId] = useState(() => Date.now().toString())
@@ -1095,7 +1112,7 @@ function CreateMeal({ onBack, onSaved }) {
     }))
     try {
       await saveMeal(rows)
-      onSaved()
+      onSaved(rows)
     } catch (err) {
       setError(err.message)
       setSaving(false)

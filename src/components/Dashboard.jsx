@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { readCache, writeCache, getDashboard, deleteDailyMeal, markDashboardLoaded, readOutbox, removeOutboxWhere, markOutboxConfirmed, outboxId, outboxDate } from '../api/sheets'
+import { readCache, writeCache, getDashboard, deleteDailyMeal, markDashboardLoaded, readOutbox, removeOutboxWhere, dropFromDashboardCache, outboxId, outboxDate } from '../api/sheets'
 import SuggestMeals from './SuggestMeals'
 
 function today() {
@@ -50,11 +50,6 @@ export default function Dashboard({ onNavigate, refreshKey, date, onDateChange }
         setWorkout(workoutData || {})
         setGoals(goalsData)
         if (goalsData) writeCache('getGoals', {}, goalsData)
-        // Acknowledged outbox entries the server now returns can go. A deployment that
-        // doesn't write Log_ID yet returns none, so then every acknowledged one goes.
-        const groups = [...Object.values(mealsData || {}), ...Object.values(workoutData || {})]
-        const ids = groups.map(rows => rows[0]?.Log_ID).filter(Boolean)
-        markOutboxConfirmed(d, ids.length ? new Set(ids) : null)
       })
       .catch(err => setError(err.message))
       .finally(() => {
@@ -66,15 +61,24 @@ export default function Dashboard({ onNavigate, refreshKey, date, onDateChange }
 
   useEffect(() => { loadData(date) }, [date, refreshKey])
 
+  // An acknowledged write lands in the cache (sheets.js merges it there) and leaves the
+  // outbox in the same event, so re-seeding from cache keeps the entry on screen with
+  // no read-back.
   useEffect(() => {
-    const bump = () => setOutboxVersion(v => v + 1)
+    const bump = () => {
+      setOutboxVersion(v => v + 1)
+      const cached = readCache('getDashboard', { date })
+      if (cached) {
+        setMeals(cached.meals || {})
+        setWorkout(cached.workout || {})
+      }
+    }
     window.addEventListener('fittrack-outbox', bump)
     return () => window.removeEventListener('fittrack-outbox', bump)
-  }, [])
+  }, [date])
 
-  // Outbox entries for this date (pending, unsent, or acknowledged but not yet returned
-  // by a read) are shown alongside the server's, keyed by Log_ID so the two copies
-  // collapse into one once the server returns it.
+  // Outbox entries for this date (pending or unsent) are shown alongside the server's,
+  // keyed by Log_ID so the two copies collapse into one once the write is acknowledged.
   const queued = useMemo(() => {
     const out = { meals: {}, workout: {}, status: {} }
     for (const e of readOutbox()) {
@@ -83,7 +87,7 @@ export default function Dashboard({ onNavigate, refreshKey, date, onDateChange }
       const bucket = e.action === 'logMeal' ? out.meals : e.action === 'logWorkout' ? out.workout : null
       if (!bucket) continue
       bucket[id] = e.params.rows
-      out.status[id] = e.sent ? 'sent' : e.failed ? 'unsent' : 'saving'
+      out.status[id] = e.failed ? 'unsent' : 'saving'
     }
     return out
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -106,20 +110,21 @@ export default function Dashboard({ onNavigate, refreshKey, date, onDateChange }
     if (!confirm('Remove this meal?')) return
 
     if (queued.meals[key]) {
-      const status = queued.status[key]
+      // Not acknowledged yet: the server never had it, dropping it is the whole delete
       removeOutboxWhere(e => outboxId(e) === key)
-      // Not acknowledged: the server never had it, dropping it is the whole delete
-      if (status !== 'sent') { showToast('Meal removed'); return }
-      // Acknowledged: fall through to the server delete by Log_ID
+      showToast('Meal removed')
+      return
     }
 
     setDeleting(key)
 
-    // Optimistic: remove from UI immediately
+    // Optimistic: remove from UI and cache immediately
     const prev = { ...meals }
+    const prevCache = readCache('getDashboard', { date })
     const next = { ...meals }
     delete next[key]
     setMeals(next)
+    dropFromDashboardCache(date, key)
     showToast('Meal removed')
 
     try {
@@ -127,6 +132,7 @@ export default function Dashboard({ onNavigate, refreshKey, date, onDateChange }
     } catch {
       // Revert on failure
       setMeals(prev)
+      if (prevCache) writeCache('getDashboard', { date }, prevCache)
       showToast('Failed to delete. Try again.')
     }
     setDeleting(null)

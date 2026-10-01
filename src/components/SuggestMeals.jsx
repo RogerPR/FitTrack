@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { getIngredientsList } from '../data/ingredientCache'
+import { getIngredientsList, readIngredientsNow } from '../data/ingredientCache'
 import mealTemplates from '../data/mealTemplates.json'
 import { logMeal } from '../api/sheets'
 
@@ -100,7 +100,7 @@ function suggestMeals(goals, todayTotals, ingMap, categories) {
 }
 
 export default function SuggestMeals({ goals, todayTotals, onClose, date }) {
-  const [ingredients, setIngredients] = useState([])
+  const [ingredients, setIngredients] = useState(() => readIngredientsNow())
   useEffect(() => { getIngredientsList().then(setIngredients) }, [])
 
   const ingMap = useMemo(() => {
